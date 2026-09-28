@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "labkit"
+version = "0.1.0"
+description = "Small shared pieces for Gustavo's homelab projects: WhatsApp via WAHA, the local LLM broker, Pi deploys, project scaffolding and agent skills."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pyyaml>=6"]
+
+[project.scripts]
+labkit = "labkit.cli:main"
+
+[tool.setuptools]
+packages = ["labkit"]
+
+[tool.setuptools.package-data]
+labkit = ["skills/*/SKILL.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
