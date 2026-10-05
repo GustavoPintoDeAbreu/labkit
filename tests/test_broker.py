@@ -46,3 +46,9 @@ def test_running_and_unload(monkeypatch):
     assert broker.running("http://b") == [{"model": "kaya"}]
     broker.unload("redditcast-writer", "http://b")
     assert calls == [("GET", "http://b/running"), ("POST", "http://b/api/models/unload/redditcast-writer")]
+
+
+def test_app_name_goes_in_the_user_agent():
+    llm = broker.LLM.for_model("qwen-impl", url="http://b", app="subs-llm-translation")
+    assert llm._client.headers["User-Agent"] == "subs-llm-translation"
+    assert "python-httpx" in broker.LLM.for_model("qwen-impl", url="http://b")._client.headers["User-Agent"]
