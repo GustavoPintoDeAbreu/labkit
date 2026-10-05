@@ -30,9 +30,11 @@ class LLM:
     """Chat with one broker model. ``base_url`` is the OpenAI root, e.g. ``http://127.0.0.1:8200/v1``."""
 
     def __init__(self, base_url: str, model: str, timeout_s: float = 900.0,
-                 client: Optional[httpx.Client] = None):
+                 client: Optional[httpx.Client] = None, app: Optional[str] = None):
+        """``app`` names the calling project in the User-Agent, so labwatch books its usage."""
         self.model = model
-        self._client = client or httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout_s)
+        headers = {"User-Agent": app} if app else None
+        self._client = client or httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout_s, headers=headers)
 
     @classmethod
     def for_model(cls, model: str, url: Optional[str] = None, **kw: Any) -> "LLM":

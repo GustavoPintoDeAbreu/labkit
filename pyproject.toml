@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "labkit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Small shared pieces for Gustavo's homelab projects: WhatsApp via WAHA, the local LLM broker, Pi deploys, project scaffolding and agent skills."
 readme = "README.md"
 requires-python = ">=3.11"
