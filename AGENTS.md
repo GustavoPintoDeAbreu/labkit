@@ -14,7 +14,8 @@ in `lab.yaml`; add every new module to its `provides`.
 
 - Lift code from a project that already runs it in production, keep its behavior (and
   its tests' expectations), and migrate that project to labkit in the same round.
-- Stay small: stdlib + `httpx`. Each module is usable alone.
+- Stay small: stdlib + `httpx`; anything heavier is an optional extra imported lazily (`web` → trafilatura). Each module is usable alone.
+- `labkit.web` fetches links written by strangers (Reddit comments) from machines on the home LAN: keep the public-address check (`web.public_url`, every redirect hop) on by default.
 - A release is a tag `vX.Y.Z` (bump `pyproject.toml` and `__init__.__version__` together);
   projects pin the tarball URL, so a change reaches nobody until they bump the pin.
 - `.venv/bin/pytest -q` must pass; CI runs 3.11-3.13.
