@@ -2,7 +2,7 @@
 # query it through the `lab` MCP). This repo is PUBLIC: no addresses, ports,
 # hosts or secrets here; refer to services by id.
 product: labkit
-summary: "Shared Python package for the lab's projects: WhatsApp via WAHA, the local LLM broker client, Pi deploys, project scaffolding and agent skills. Use it instead of copying code between repos."
+summary: "Shared Python package for the lab's projects: WhatsApp via WAHA, the local LLM broker client, Pi deploys, project scaffolding and agent skills, a Reddit RSS reader and web page text. Use it instead of copying code between repos."
 repo: GustavoPintoDeAbreu/labkit
 provides:
   - {id: labkit.waha, kind: lib, path: labkit/waha.py, summary: "Send WhatsApp text and voice notes (OGG/Opus) through WAHA: Notifier interface, MockNotifier twin, WahaNotifier with retry on 5xx/connection errors and fail-fast on 4xx"}
@@ -10,6 +10,8 @@ provides:
   - {id: labkit.deploy_pi, kind: cli, path: labkit/deploy_pi.py, summary: "labkit deploy-pi: ship a repo's deploy/pi compose project to the Raspberry Pi (clean-tree guard, version stamp, rsync, --init-env, build and restart)"}
   - {id: labkit.init, kind: cli, path: labkit/scaffold.py, summary: "labkit init: add AGENTS.md (with the Lab block), CLAUDE.md -> @AGENTS.md and a lab.yaml skeleton to a new project"}
   - {id: labkit.skills, kind: skill, path: labkit/skills, summary: "Agent skills send-whatsapp, use-llm-broker, deploy-to-pi, new-lab-project; labkit install-skills puts them in ~/.claude/skills"}
+  - {id: labkit.reddit, kind: lib, path: labkit/reddit.py, summary: "Reddit through public RSS only (honest User-Agent, 65 s pacing, stop on 403/429): fetch_post(url) reads a post from www/old/m permalinks, redd.it and app /s/ share links with its top comments and outbound links; RedditRSS.top() for listings"}
+  - {id: labkit.web, kind: lib, path: labkit/web.py, summary: "fetch_page(url): readable text of a web page via trafilatura (labkit[web]), size cap, never raises, skips Reddit and media hosts; GitHub repo links return the README"}
 uses: [svc.kaya-waha, svc.llm-broker, host.pi]
 docs:
   - {topic: "agent guide (start here)", path: AGENTS.md}
