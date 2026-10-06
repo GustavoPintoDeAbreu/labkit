@@ -11,7 +11,7 @@ provides:
   - {id: labkit.init, kind: cli, path: labkit/scaffold.py, summary: "labkit init: add AGENTS.md (with the Lab block), CLAUDE.md -> @AGENTS.md and a lab.yaml skeleton to a new project"}
   - {id: labkit.skills, kind: skill, path: labkit/skills, summary: "Agent skills send-whatsapp, use-llm-broker, deploy-to-pi, new-lab-project; labkit install-skills puts them in ~/.claude/skills"}
   - {id: labkit.reddit, kind: lib, path: labkit/reddit.py, summary: "Reddit through public RSS only (honest User-Agent, 65 s pacing, stop on 403/429): fetch_post(url) reads a post from www/old/m permalinks, redd.it and app /s/ share links with its top comments and outbound links; RedditRSS.top() for listings"}
-  - {id: labkit.web, kind: lib, path: labkit/web.py, summary: "fetch_page(url): readable text of a web page via trafilatura (labkit[web]), size cap, never raises, skips Reddit and media hosts; GitHub repo links return the README"}
+  - {id: labkit.web, kind: lib, path: labkit/web.py, summary: "fetch_page(url): readable text of a web page via trafilatura (labkit[web]), size cap, never raises, skips Reddit and media hosts, refuses private/LAN/Tailscale addresses (each redirect hop checked); GitHub repo links return the README"}
 uses: [svc.kaya-waha, svc.llm-broker, host.pi]
 docs:
   - {topic: "agent guide (start here)", path: AGENTS.md}

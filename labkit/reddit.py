@@ -41,6 +41,9 @@ MAX_REDIRECT_HOPS = 3                             # NEW
 _PERMALINK = re.compile(r"^/r/([A-Za-z0-9_]+)/comments/([A-Za-z0-9]+)(?:/|$)")   # NEW
 _SHARE = re.compile(r"^/r/[A-Za-z0-9_]+/s/[A-Za-z0-9_-]+/?$")                    # NEW
 _SHORT = re.compile(r"^/[A-Za-z0-9]+/?$")                                         # NEW
+# Where redd.it/<id> lands: a post page with no subreddit in the path. Its feed is
+# /comments/<id>/.rss (checked live 2026-10-06; it answers 200, not a redirect).
+_BARE = re.compile(r"^/comments/([A-Za-z0-9]+)(?:/|$)")
 
 
 @dataclass
@@ -101,7 +104,18 @@ def post_path(url: str) -> str | None:
     if not _is_reddit_host((u.hostname or "").lower()):
         return None
     m = _PERMALINK.match(u.path)
-    return f"/r/{m.group(1)}/comments/{m.group(2)}" if m else None
+    if m:
+        return f"/r/{m.group(1)}/comments/{m.group(2)}"
+    m = _BARE.match(u.path)
+    return f"/comments/{m.group(1)}" if m else None
+
+
+def _short_path(url: str) -> str | None:
+    """``/comments/<id>`` for a ``redd.it/<id>`` shortlink, with no request; None otherwise."""
+    u = _parse(url)
+    if (u.hostname or "").lower() != "redd.it" or not _SHORT.match(u.path):
+        return None
+    return f"/comments/{u.path.strip('/')}"
 
 
 def is_redirect_link(url: str) -> bool:
@@ -386,7 +400,7 @@ class RedditRSS:
         """One post with up to ``comments`` top comments. Raises RedditBlocked when
         Reddit refuses and PostUnreadable for anything else; never a bare httpx error."""
         try:
-            path = post_path(url)
+            path = post_path(url) or _short_path(url)
             if path is None:
                 if not is_redirect_link(url):
                     raise PostUnreadable(f"not a Reddit post link: {url}")
@@ -401,5 +415,8 @@ def fetch_post(url: str, *, user_agent: str, comments: int = 8,                 
                client: httpx.Client | None = None) -> Post:
     """Read one Reddit post (title, subreddit, body, link_url, top comments, links).
     Accepts www/old/new/m/np permalinks, comment permalinks, redd.it/<id> and app share
-    links /r/<sub>/s/<code>. See ``RedditRSS.post`` for errors."""
+    links /r/<sub>/s/<code>. See ``RedditRSS.post`` for errors.
+
+    Each call builds its own client (closed when garbage-collected) and its own pacing;
+    to read several posts, keep one ``RedditRSS`` so the 65 s spacing holds across them."""
     return RedditRSS(user_agent, client=client).post(url, comments)

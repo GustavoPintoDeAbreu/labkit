@@ -239,6 +239,10 @@ def test_post_path_rejects(url):
     assert post_path(url) is None
 
 
+def test_post_path_takes_a_bare_comments_page():
+    assert post_path("https://www.reddit.com/comments/abc123/") == "/comments/abc123"
+
+
 def test_is_redirect_link():
     assert is_redirect_link("https://www.reddit.com/r/LocalLLaMA/s/AbC12xY")
     assert is_redirect_link("https://redd.it/abc123")
@@ -277,15 +281,25 @@ def test_share_link_resolves_then_reads():
     assert clock.sleeps == [65]
 
 
-def test_redd_it_follows_hops():
+def test_redd_it_reads_the_bare_comments_feed():
+    # redd.it/<id> lands on www.reddit.com/comments/<id>, which answers 200 (live, 2026-10-06):
+    # the feed is read straight from /comments/<id>/.rss, with no redirect request.
     seen = []
-    r, clock = client([(301, "", {"location": "https://www.reddit.com/comments/abc123/"}),
-                       (301, "", {"location": PERMALINK}),
-                       (200, FEED, {})], seen=seen)
+    r, clock = client([(200, FEED, {})], seen=seen)
     p = r.post("https://redd.it/abc123")
     assert p.id == "t3_abc123"
-    assert seen == ["https://redd.it/abc123", "https://www.reddit.com/comments/abc123/", RSS]
-    assert clock.sleeps == [65, 65]
+    assert seen == ["https://www.reddit.com/comments/abc123/.rss?sort=top&limit=13"]
+    assert clock.sleeps == []
+
+
+def test_a_share_link_landing_on_a_bare_comments_path_resolves():
+    seen = []
+    r, clock = client([(301, "", {"location": "https://www.reddit.com/comments/abc123/"}),
+                       (200, FEED, {})], seen=seen)
+    p = r.post("https://www.reddit.com/r/LocalLLaMA/s/AbC12xY")
+    assert p.id == "t3_abc123"
+    assert seen == ["https://www.reddit.com/r/LocalLLaMA/s/AbC12xY",
+                    "https://www.reddit.com/comments/abc123/.rss?sort=top&limit=13"]
 
 
 def test_share_link_without_redirect_is_unreadable():
@@ -341,7 +355,7 @@ def test_fetch_post_module_function():
 def test_default_client_and_user_agent():
     r = RedditRSS("labkit-test/1.0")
     assert r._client.headers["User-Agent"] == "labkit-test/1.0"
-    assert r._client.base_url.host == "www.reddit.com"
+    assert str(r._client.base_url).rstrip("/") == "https://www.reddit.com"
     assert r._client.follow_redirects is True
     with pytest.raises(ValueError):
         RedditRSS("  ")
