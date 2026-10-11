@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "labkit"
-version = "0.3.0"
-description = "Small shared pieces for Gustavo's homelab projects: WhatsApp via WAHA, the local LLM broker, Pi deploys, project scaffolding, agent skills, Reddit RSS reader, readable web page text."
+version = "0.4.0"
+description = "Small shared pieces for Gustavo's homelab projects: WhatsApp via WAHA, the local LLM broker, Pi deploys, project scaffolding, agent skills, Reddit RSS reader, readable web page text, scraping through a residential proxy."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -13,6 +13,7 @@ dependencies = ["httpx>=0.27"]
 
 [project.optional-dependencies]
 web = ["trafilatura>=2.0"]
+scrape = ["playwright>=1.55"]
 test = ["pytest>=8", "pyyaml>=6", "trafilatura>=2.0"]
 
 [project.scripts]
