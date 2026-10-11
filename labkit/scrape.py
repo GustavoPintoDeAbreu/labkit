@@ -14,7 +14,11 @@ scrapes a site from the home IP. Country and session targeting are password suff
   2026-10-07), so run it under a virtual display (``xvfb-run``). Needs ``labkit[scrape]``
   plus ``playwright install chromium``; Playwright is imported only when the browser starts.
   ``block_resources`` drops images, fonts or media before they are fetched: the proxy bills
-  per GB.
+  per GB, and ``allow_hosts`` aborts every request to another host (third-party and CDN
+  scripts: an Idealista page costs ~150 KB through the proxy instead of ~2 MB). ``engine="patchright"`` (``labkit[stealth]``, then ``patchright install chromium``)
+  drives Patchright, Playwright with its automation tells patched out: Idealista's Cloudflare
+  challenge never clears for Playwright's Chromium but lets Patchright's through (verified
+  2026-10-11 through Evomi PT exits).
 - Both count the bytes they pulled through the proxy (``bytes_used``), so a run can stop at
   a daily cap. httpx counts the bytes on the wire; the browser counts each finished
   request's encoded body and headers.
@@ -27,6 +31,7 @@ returning nothing.
 """
 from __future__ import annotations
 
+import functools
 import gzip
 import json
 import random
@@ -36,7 +41,7 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, Protocol, runtime_checkable
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -171,9 +176,12 @@ class ProxyFetcher(_Paced):
         self._client.close()
 
 
-def _launch_playwright(proxy: dict):
-    """Start Playwright and a headed Chromium. Returns (playwright, browser, page)."""
-    from playwright.sync_api import sync_playwright  # labkit[scrape]; heavy, so only here
+def _launch_playwright(proxy: dict, engine: str = "playwright"):
+    """Start Playwright (or Patchright) and a headed Chromium. Returns (playwright, browser, page)."""
+    if engine == "patchright":
+        from patchright.sync_api import sync_playwright  # labkit[stealth]
+    else:
+        from playwright.sync_api import sync_playwright  # labkit[scrape]; heavy, so only here
 
     pw = sync_playwright().start()
     try:
@@ -191,8 +199,9 @@ class BrowserFetcher(_Paced):
 
     def __init__(self, user: str, password: str, *, country: str = "PT", delay_s: float = 5.0,
                  raw_log: RawLog | None = None, ready_selector: str | None = None,
-                 block_resources: tuple[str, ...] = (),
-                 launch: Callable[[dict], tuple] = _launch_playwright,
+                 block_resources: tuple[str, ...] = (), allow_hosts: tuple[str, ...] = (),
+                 engine: str = "playwright",
+                 launch: Callable[..., tuple] = _launch_playwright,
                  sleep=time.sleep, clock=time.monotonic, rng: random.Random | None = None):
         self.user = user
         self.password = password
@@ -201,7 +210,12 @@ class BrowserFetcher(_Paced):
         self.raw_log = raw_log
         self.ready_selector = ready_selector
         self.block_resources = tuple(block_resources)
-        self.launch = launch
+        self.allow_hosts = tuple(h.lower() for h in allow_hosts)
+        if engine not in ("playwright", "patchright"):
+            raise ValueError(f"unknown browser engine {engine!r}")
+        self.engine = engine
+        # A custom launcher (tests, price-scout's) takes just the proxy unless an engine is asked for.
+        self.launch = launch if engine == "playwright" else functools.partial(launch, engine=engine)
         self.sleep = sleep
         self.clock = clock
         self.rng = rng or random.Random()
@@ -219,15 +233,23 @@ class BrowserFetcher(_Paced):
         if self._page is None:
             try:
                 self._pw, self._browser, self._page = self.launch(self.proxy())
-                if self.block_resources:
-                    blocked = set(self.block_resources)
-                    self._page.route("**/*", lambda route: route.abort() if route.request.resource_type in blocked
-                                     else route.continue_())
+                if self.block_resources or self.allow_hosts:
+                    self._page.route("**/*", lambda route: route.continue_() if self.wanted(route.request)
+                                     else route.abort())
                 self._page.on("requestfinished", lambda request: self._finished.append(request))  # Playwright wraps Python callables only
             except Exception as e:  # noqa: BLE001 - no browser means the source is unavailable
                 self.close()
                 raise SourceUnavailable(f"browser did not start: {e}") from e
         return self._page
+
+    def wanted(self, request) -> bool:
+        """False for a blocked resource type, or a host outside ``allow_hosts`` (subdomains count)."""
+        if request.resource_type in self.block_resources:
+            return False
+        if not self.allow_hosts:
+            return True
+        host = (urlsplit(request.url).hostname or "").lower()
+        return any(host == h or host.endswith("." + h) for h in self.allow_hosts)
 
     def _count(self) -> None:
         """Add the finished requests' sizes; Playwright API calls are not made inside its event handler."""
@@ -239,7 +261,9 @@ class BrowserFetcher(_Paced):
             except Exception:  # noqa: BLE001 - a request without sizes counts as zero
                 pass
 
-    def get(self, url: str, *, tag: str, platform: str = "page") -> str:
+    def get(self, url: str, *, tag: str, platform: str = "page", raw: bool = False) -> str:
+        """The rendered page (DOM after its scripts ran); ``raw=True`` gives the body as served
+        instead, with no waiting: for a JSON API that only a browser can reach."""
         self._pace()
         page = self._ensure()
         try:
@@ -249,13 +273,16 @@ class BrowserFetcher(_Paced):
                 raise SourceUnavailable(f"blocked {status}")
             if status >= 400:
                 raise SourceUnavailable(f"http {status}")
-            if self.ready_selector:
-                try:
-                    page.wait_for_selector(self.ready_selector, state="attached", timeout=READY_TIMEOUT_MS)
-                except Exception:  # noqa: BLE001 - the parser reports a page without its data
-                    pass
-            page.wait_for_timeout(SETTLE_MS)
-            html = page.content()
+            if raw:
+                html = response.text()
+            else:
+                if self.ready_selector:
+                    try:
+                        page.wait_for_selector(self.ready_selector, state="attached", timeout=READY_TIMEOUT_MS)
+                    except Exception:  # noqa: BLE001 - the parser reports a page without its data
+                        pass
+                page.wait_for_timeout(SETTLE_MS)
+                html = page.content()
         except SourceUnavailable:
             raise
         except Exception as e:  # noqa: BLE001 - timeouts, proxy errors, a crashed tab

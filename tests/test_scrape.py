@@ -87,8 +87,11 @@ def test_bytes_used_counts_refused_pages_too():
 # --- BrowserFetcher (price-scout tests/test_browser.py) ---
 
 class FakeResponse:
-    def __init__(self, status):
-        self.status = status
+    def __init__(self, status, body=""):
+        self.status, self.body = status, body
+
+    def text(self):
+        return self.body
 
 
 class FakeRequest:
@@ -136,7 +139,7 @@ class FakePage:
             if route.result != "abort":
                 for handler in self.listeners.get("requestfinished", []):
                     handler(req)
-        return FakeResponse(status)
+        return FakeResponse(status, f"raw:{url}")
 
     def wait_for_selector(self, selector, **kw):
         self.waited.append(selector)
@@ -244,3 +247,39 @@ def test_rawlog_disabled_writes_nothing(tmp_path):
 def test_looks_blocked():
     assert looks_blocked("<title>Robot Check</title>")
     assert not looks_blocked("<html>T2 em Alvalade</html>")
+
+
+def test_patchright_engine_is_passed_to_the_launcher():
+    seen = []
+
+    def launch(proxy, engine="playwright"):
+        seen.append(engine)
+        return Closer(), Closer(), FakePage({"https://a/1": (200, "x", [])})
+    f = BrowserFetcher("u", "p", engine="patchright", launch=launch, sleep=lambda s: None)
+    f.get("https://a/1", tag="t")
+    assert seen == ["patchright"]
+
+
+def test_unknown_engine_is_refused():
+    with pytest.raises(ValueError):
+        BrowserFetcher("u", "p", engine="selenium")
+
+
+def test_allow_hosts_aborts_other_hosts_but_keeps_subdomains():
+    subs = [FakeRequest("https://dd.site.pt/tags.js", "script", body=100),
+            FakeRequest("https://cdn.other.com/big.js", "script", body=90_000),
+            FakeRequest("https://challenges.cloudflare.com/t.js", "script", body=10)]
+    f, page, *_ = make({"https://www.site.pt/1": (200, "x", subs)}, [],
+                       allow_hosts=("site.pt", "challenges.cloudflare.com"))
+    f.get("https://www.site.pt/1", tag="t")
+    results = {r.request.url: r.result for r in page.routes}
+    assert results["https://cdn.other.com/big.js"] == "abort"
+    assert [u for u, r in results.items() if r == "continue"] == [
+        "https://www.site.pt/1", "https://dd.site.pt/tags.js", "https://challenges.cloudflare.com/t.js"]
+    assert f.bytes_used == 1200 + 100 + 10
+
+
+def test_raw_returns_the_body_as_served_without_waiting():
+    f, page, *_ = make({"https://a/api/x": (200, "<pre>rendered</pre>", [])}, [], ready_selector="#x")
+    assert f.get("https://a/api/x", tag="t", raw=True) == "raw:https://a/api/x"
+    assert page.waited == []
