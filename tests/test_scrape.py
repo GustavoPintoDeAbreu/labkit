@@ -95,8 +95,8 @@ class FakeResponse:
 
 
 class FakeRequest:
-    def __init__(self, url, resource_type="document", body=0, headers=0):
-        self.url, self.resource_type, self._sizes = url, resource_type, (body, headers)
+    def __init__(self, url, resource_type="document", body=0, headers=0, text=""):
+        self.url, self.resource_type, self._sizes, self.text_body = url, resource_type, (body, headers), text
 
     def sizes(self):
         return {"responseBodySize": self._sizes[0], "responseHeadersSize": self._sizes[1]}
@@ -139,6 +139,10 @@ class FakePage:
             if route.result != "abort":
                 for handler in self.listeners.get("requestfinished", []):
                     handler(req)
+                for handler in self.listeners.get("response", []):
+                    response = FakeResponse(200, req.text_body)
+                    response.url = req.url
+                    handler(response)
         return FakeResponse(status, f"raw:{url}")
 
     def wait_for_selector(self, selector, **kw):
@@ -283,3 +287,26 @@ def test_raw_returns_the_body_as_served_without_waiting():
     f, page, *_ = make({"https://a/api/x": (200, "<pre>rendered</pre>", [])}, [], ready_selector="#x")
     assert f.get("https://a/api/x", tag="t", raw=True) == "raw:https://a/api/x"
     assert page.waited == []
+
+
+def test_capture_returns_the_pages_own_data_call():
+    """A booking engine renders its fares from an XHR after the page loads; the body
+    of that call is what the caller wants, not the page shell."""
+    data = FakeRequest("https://b/bfm/rest/booking/availability/search", "xhr", 300, 10, text='{"data": 1}')
+    other = FakeRequest("https://b/assets/footer.json", "xhr", 10, 10, text="{}")
+    f, page, *_ = make({"https://b/deeplink": (200, "<app-root></app-root>", [other, data])}, [],
+                       capture="booking/availability/search")
+    assert f.get("https://b/deeplink", tag="t") == '{"data": 1}'
+
+
+def test_capture_falls_back_to_the_page_when_the_call_never_comes():
+    f, page, *_ = make({"https://b/deeplink": (200, "<app-root></app-root>", [])}, [],
+                       capture="booking/availability/search")
+    assert f.get("https://b/deeplink", tag="t") == "<app-root></app-root>"
+
+
+def test_capture_is_per_get():
+    data = FakeRequest("https://b/avail?1", "xhr", 1, 1, text="first")
+    f, page, *_ = make({"https://b/1": (200, "one", [data]), "https://b/2": (200, "two", [])}, [], capture="avail")
+    assert f.get("https://b/1", tag="t") == "first"
+    assert f.get("https://b/2", tag="t") == "two"

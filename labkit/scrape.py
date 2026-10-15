@@ -57,6 +57,8 @@ DEFAULT_HEADERS = {
 NAV_TIMEOUT_MS = 60_000
 SETTLE_MS = 2_500            # after DOMContentLoaded, for the page's own scripts
 READY_TIMEOUT_MS = 15_000
+CAPTURE_TIMEOUT_MS = 30_000     # how long a page's own data call may take to arrive
+CAPTURE_POLL_MS = 500
 
 BLOCK_MARKERS = ("validatecaptcha", "captcha", "robot check", "are you a human")
 
@@ -200,6 +202,7 @@ class BrowserFetcher(_Paced):
     def __init__(self, user: str, password: str, *, country: str = "PT", delay_s: float = 5.0,
                  raw_log: RawLog | None = None, ready_selector: str | None = None,
                  block_resources: tuple[str, ...] = (), allow_hosts: tuple[str, ...] = (),
+                 capture: str | None = None,
                  engine: str = "playwright",
                  launch: Callable[..., tuple] = _launch_playwright,
                  sleep=time.sleep, clock=time.monotonic, rng: random.Random | None = None):
@@ -211,6 +214,12 @@ class BrowserFetcher(_Paced):
         self.ready_selector = ready_selector
         self.block_resources = tuple(block_resources)
         self.allow_hosts = tuple(h.lower() for h in allow_hosts)
+        # A single-page app loads its data after the page itself: with ``capture`` set,
+        # ``get`` returns the body of the first response whose URL contains it (the
+        # page's own data call, e.g. a booking engine's availability JSON) instead of
+        # the HTML. If none arrives within CAPTURE_TIMEOUT_MS it returns the HTML.
+        self.capture = capture
+        self._captured: list = []
         if engine not in ("playwright", "patchright"):
             raise ValueError(f"unknown browser engine {engine!r}")
         self.engine = engine
@@ -237,6 +246,9 @@ class BrowserFetcher(_Paced):
                     self._page.route("**/*", lambda route: route.continue_() if self.wanted(route.request)
                                      else route.abort())
                 self._page.on("requestfinished", lambda request: self._finished.append(request))  # Playwright wraps Python callables only
+                if self.capture:
+                    self._page.on("response", lambda response: self._captured.append(response)
+                                  if self.capture in response.url else None)
             except Exception as e:  # noqa: BLE001 - no browser means the source is unavailable
                 self.close()
                 raise SourceUnavailable(f"browser did not start: {e}") from e
@@ -266,6 +278,7 @@ class BrowserFetcher(_Paced):
         instead, with no waiting: for a JSON API that only a browser can reach."""
         self._pace()
         page = self._ensure()
+        self._captured.clear()
         try:
             response = page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
             status = response.status if response is not None else 0
@@ -275,6 +288,8 @@ class BrowserFetcher(_Paced):
                 raise SourceUnavailable(f"http {status}")
             if raw:
                 html = response.text()
+            elif self.capture:
+                html = self._captured_body(page)
             else:
                 if self.ready_selector:
                     try:
@@ -292,6 +307,16 @@ class BrowserFetcher(_Paced):
         if self.raw_log is not None:
             self.raw_log.write(platform, tag, html)
         return html
+
+    def _captured_body(self, page) -> str:
+        """The captured data call's body, waiting for it; the rendered page if it never came."""
+        waited = 0
+        while not self._captured and waited < CAPTURE_TIMEOUT_MS:
+            page.wait_for_timeout(CAPTURE_POLL_MS)
+            waited += CAPTURE_POLL_MS
+        if self._captured:
+            return self._captured[0].text()
+        return page.content()
 
     def close(self) -> None:
         for closer in (getattr(self._browser, "close", None), getattr(self._pw, "stop", None)):
