@@ -17,3 +17,4 @@ uses: [svc.kaya-waha, svc.llm-broker, host.pi]
 docs:
   - {topic: "agent guide (start here)", path: AGENTS.md}
   - {topic: "README: install and release", path: README.md}
+  - {topic: "scraping playbook: the ladder, what worked on which site (KuantoKusta, Idealista, TAP, easyJet, OLX), checking a page is real", path: docs/scraping-playbook.md}
