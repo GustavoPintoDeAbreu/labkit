@@ -53,13 +53,13 @@ weren't blocks. They were HTTP 200 pages with a header and footer and no results
 | KuantoKusta | Akamai | headed Chromium on Xvfb; httpx and headless are refused | 2026-10-07 |
 | Idealista | Cloudflare | Patchright headed, retried on a new session (some exits fail); httpx and Playwright are refused | 2026-10 |
 | TAP (booking engine) | Angular app | Patchright + `capture="bfm/rest/booking/availability/search"` on the `booking.flytap.com/booking/flights/deeplink` URL, about 5 MB a read | 2026-10-15 |
-| easyJet | Akamai, pages and data API | **nothing yet.** httpx 403; Patchright 403 even after a homepage warm-up; Evomi Scraper API (browser mode) ends in Access Denied; Camoufox reaches "Pick Flights", but `POST /funnel/api/query` (the fares) gets 403 | 2026-10-16 |
+| easyJet | Akamai, pages and data API | **nothing yet.** httpx 403; Patchright 403 even after a homepage warm-up; Evomi Scraper API (browser mode) ends in Access Denied; Camoufox reaches "Pick Flights", but `POST /funnel/api/query` (the fares) gets 403; Shard Browser (closed-source Chromium) is refused at the deeplink | 2026-10-16 |
 | AliExpress | browser-rendered product pages | search data in `_init_data_` JSON; product pages skipped | 2026-10-07 |
 | OLX Portugal | refuses plain clients | headed browser fetching only the served document (price-scout `OlxBrowser`); the data is `window.__PRERENDERED_STATE__` | 2026-10 |
 
 Still untried on easyJet: a longer warm-up on one session, other exit countries,
-a logged-in session, and Shard Browser (closed-source, recommended for Akamai on
-r/webscraping).
+and a logged-in session. Shard Browser (ShardX, Linux x64 only) needs `unzip` and
+`--no-sandbox` in a container and takes SOCKS5 proxies (Evomi port 1002).
 
 ## Adding a site
 
