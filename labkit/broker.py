@@ -40,8 +40,8 @@ class LLM:
     def for_model(cls, model: str, url: Optional[str] = None, **kw: Any) -> "LLM":
         return cls(broker_url(url) + "/v1", model, **kw)
 
-    def complete(self, messages: List[Dict[str, str]], *, temperature: float = 0.7,
-                 max_tokens: int = 4096, thinking: bool = False, **extra: Any) -> str:
+    def _message(self, messages: List[Dict[str, Any]], temperature: float, max_tokens: int,
+                 thinking: bool, extra: Dict[str, Any]) -> Dict[str, Any]:
         body = {"model": self.model, "messages": messages, "temperature": temperature,
                 "max_tokens": max_tokens, **extra}
         if not thinking:
@@ -49,8 +49,27 @@ class LLM:
             body["chat_template_kwargs"] = {"enable_thinking": False}
         r = self._client.post("/chat/completions", json=body)
         r.raise_for_status()
-        text = r.json()["choices"][0]["message"]["content"] or ""
+        return r.json()["choices"][0]["message"]
+
+    def complete(self, messages: List[Dict[str, str]], *, temperature: float = 0.7,
+                 max_tokens: int = 4096, thinking: bool = False, **extra: Any) -> str:
+        text = self._message(messages, temperature, max_tokens, thinking, extra)["content"] or ""
         return _THINK.sub("", text).strip()
+
+    def complete_tools(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]], *,
+                       temperature: float = 0.3, max_tokens: int = 4096, thinking: bool = False,
+                       **extra: Any) -> Dict[str, Any]:
+        """One turn with OpenAI-style ``tools``: the whole assistant message, ``tool_calls`` included.
+
+        ``content`` comes back with any ``<think>`` block removed and ``tool_calls`` as a
+        list (empty when the model answered in text), so the result can be appended to
+        ``messages`` as it is before the tool results go in.
+        """
+        message = dict(self._message(messages, temperature, max_tokens, thinking, {"tools": tools, **extra}))
+        message["content"] = _THINK.sub("", message.get("content") or "").strip()
+        message["tool_calls"] = message.get("tool_calls") or []
+        message.setdefault("role", "assistant")
+        return message
 
     def chat(self, system: str, user: str, **kw: Any) -> str:
         return self.complete([{"role": "system", "content": system}, {"role": "user", "content": user}], **kw)

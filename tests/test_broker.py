@@ -32,6 +32,27 @@ def test_chat_body_and_think_stripping():
     assert "chat_template_kwargs" not in seen[1][1]
 
 
+def test_complete_tools_returns_the_tool_calls():
+    seen = []
+    call = {"id": "c1", "type": "function", "function": {"name": "status", "arguments": "{\"product\": \"kaya\"}"}}
+
+    def handler(req):
+        seen.append(json.loads(req.content))
+        if len(seen) == 1:
+            return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": None,
+                                                                      "tool_calls": [call]}}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "<think>x</think>All good."}}]})
+
+    llm = broker.LLM("http://b/v1", "qwen-impl", client=httpx.Client(base_url="http://b/v1",
+                                                                     transport=httpx.MockTransport(handler)))
+    tools = [{"type": "function", "function": {"name": "status", "parameters": {"type": "object"}}}]
+    first = llm.complete_tools([{"role": "user", "content": "is kaya up?"}], tools)
+    assert first == {"role": "assistant", "content": "", "tool_calls": [call]}
+    assert seen[0]["tools"] == tools and seen[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    second = llm.complete_tools([{"role": "user", "content": "?"}], tools)
+    assert second == {"role": "assistant", "content": "All good.", "tool_calls": []}
+
+
 def test_running_and_unload(monkeypatch):
     calls = []
 
