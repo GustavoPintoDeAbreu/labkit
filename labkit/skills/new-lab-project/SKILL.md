@@ -16,5 +16,10 @@ description: Start a new project in Gustavo's homelab so every agent and the lab
 4. **Register it:** add the repo's path to `catalog.repos` in labwatch's `config.yaml` (PR).
 5. **If it runs unattended:** deploy with the `deploy-to-pi` skill (or the PC's broker for
    GPU work), and add a labwatch collector or health rule, through a PR.
-6. Keep `AGENTS.md` short (commands, rules, doc index); put history and detail in
+6. **If it holds data Gustavo would ask about** (prices, runs, listings, status): give its
+   website a `/mcp` server (streamable HTTP, stateless JSON) with a read-only `status` tool and
+   `readOnlyHint` on every read; writes are the website's own forms, annotated as writes.
+   Pattern: price-scout `docs/agent/mcp.md`. Then add it to lab-assistant (its `.env`
+   `ASSISTANT_MCP_SERVERS` and `assistant/agent.py` `SERVERS`), so he can ask it by voice.
+7. Keep `AGENTS.md` short (commands, rules, doc index); put history and detail in
    `docs/agent/*.md` and list them under `docs:` in `lab.yaml`.

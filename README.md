@@ -19,8 +19,8 @@ so each project stops carrying its own copy.
 Pinned to a release tarball, so slim Docker images need no `git`:
 
 ```
-labkit @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.6.0.tar.gz
-labkit[web] @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.6.0.tar.gz
+labkit @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.6.1.tar.gz
+labkit[web] @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.6.1.tar.gz
 ```
 
 (add `[web]` to use `labkit.web`, `[scrape]` for `labkit.scrape`'s browser; then `playwright install --with-deps chromium`)
