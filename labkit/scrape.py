@@ -40,7 +40,7 @@ import string
 import time
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, runtime_checkable
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -307,6 +307,25 @@ class BrowserFetcher(_Paced):
         if self.raw_log is not None:
             self.raw_log.write(platform, tag, html)
         return html
+
+    def screenshot(self, url: str, *, tag: str, platform: str = "page",
+                   prepare: Callable[[Any], None] | None = None, full_page: bool = False) -> tuple[bytes, str]:
+        """A PNG of the page as drawn once it settled (the viewport, or ``full_page``), and its
+        rendered HTML. ``prepare(page)`` runs first, e.g. to dismiss a cookie banner; its errors
+        are ignored. Blocks and failures raise SourceUnavailable, as ``get`` does."""
+        html = self.get(url, tag=tag, platform=platform)
+        page = self._page
+        if prepare is not None:
+            try:
+                prepare(page)
+            except Exception:  # noqa: BLE001 - a banner that would not go is still a picture
+                pass
+        try:
+            return page.screenshot(type="png", full_page=full_page), html
+        except Exception as e:  # noqa: BLE001 - a crashed tab, a timeout
+            raise SourceUnavailable(f"screenshot failed: {type(e).__name__}: {str(e)[:200]}") from e
+        finally:
+            self._count()
 
     def _captured_body(self, page) -> str:
         """The captured data call's body, waiting for it; the rendered page if it never came."""
