@@ -310,3 +310,20 @@ def test_capture_is_per_get():
     f, page, *_ = make({"https://b/1": (200, "one", [data]), "https://b/2": (200, "two", [])}, [], capture="avail")
     assert f.get("https://b/1", tag="t") == "first"
     assert f.get("https://b/2", tag="t") == "two"
+
+
+def test_screenshot_after_the_page_settles_with_a_prepare_step():
+    f, page, *_ = make({"https://a/1": (200, "<html>story</html>", []), "https://a/x": (403, "no", [])}, [])
+    shots, prepared = [], []
+    page.screenshot = lambda **kw: shots.append(kw) or b"PNG"
+    png, html = f.screenshot("https://a/1", tag="t", prepare=lambda p: prepared.append(p) or 1 / 0)
+    assert (png, html) == (b"PNG", "<html>story</html>") and prepared == [page]   # prepare's error ignored
+    assert shots == [{"type": "png", "full_page": False}] and f.bytes_used == 1200
+    with pytest.raises(SourceUnavailable, match="blocked 403"):
+        f.screenshot("https://a/x", tag="t")
+
+    def broken(**kw):
+        raise TimeoutError("slow")
+    page.screenshot = broken
+    with pytest.raises(SourceUnavailable, match="screenshot failed: TimeoutError"):
+        f.screenshot("https://a/1", tag="t")

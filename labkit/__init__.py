@@ -8,4 +8,4 @@
 - ``labkit deploy-pi``: ship a compose project to the Raspberry Pi.
 - ``labkit init`` / ``labkit install-skills``: join a repo, or an agent, to the lab.
 """
-__version__ = "0.6.1"
+__version__ = "0.7.0"
