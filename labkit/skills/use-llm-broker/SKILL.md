@@ -16,7 +16,7 @@ text = llm.chat("You are terse.", "Summarize: ...", temperature=0.3, max_tokens=
 ```
 
 - **Which model:** `qwen-impl` (GPU0) for any project, batch or background job. Never
-  `kaya` / `kaya-llamacpp`: that is Kaya's production model, and its single request slot
+  `kaya`: that is Kaya's production model, and its single request slot
   serves her WhatsApp replies, so a batch job there makes her wait. Using the model the
   coding tools already use (`qwen-impl`) also means no model swaps on GPU0.
 - `app=` names your project in the User-Agent, so labwatch books its usage to it.
