@@ -3,9 +3,10 @@
 - ``labkit.waha``: WhatsApp through WAHA (text and voice notes), with a mock twin.
 - ``labkit.broker``: the local LLM broker (chat, tool calls, what is loaded, unload).
 - ``labkit.reddit``: read Reddit posts and listings through the public RSS feeds (paced, stops when refused).
+- ``labkit-reddit-mcp`` (``labkit[mcp]``): a stdio MCP server so coding agents can read Reddit posts.
 - ``labkit.web``: readable text of a web page (``labkit[web]`` for trafilatura); GitHub repos give their README.
 - ``labkit.scrape``: fetch pages through the Evomi residential proxy, plain or in a headed browser (``labkit[scrape]``), with a raw-page log.
 - ``labkit deploy-pi``: ship a compose project to the Raspberry Pi.
 - ``labkit init`` / ``labkit install-skills``: join a repo, or an agent, to the lab.
 """
-__version__ = "0.7.0"
+__version__ = "0.8.0"
