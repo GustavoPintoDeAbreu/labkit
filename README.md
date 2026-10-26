@@ -7,6 +7,7 @@ so each project stops carrying its own copy.
 |---|---|
 | `labkit.waha` | WhatsApp through a self-hosted [WAHA](https://waha.devlike.pro): text and voice notes, retry on 5xx, fail fast on 4xx, and a `MockNotifier` twin for development |
 | `labkit.broker` | The local LLM broker (llama-swap): `LLM.for_model(name).chat(...)`, `running()`, `unload()` |
+| `labkit.gpu_claims` | Say "I am using GPU0" while working outside the broker's queue and release it when done; `claims()` for whoever is about to start long GPU work |
 | `labkit.reddit` | Reddit through its public RSS feeds: `fetch_post(url, user_agent=...)` (permalinks, `redd.it`, app share links) with top comments and outbound links; one request per 65 s, stops on 403/429 |
 | `labkit.web` | `fetch_page(url)`: readable text of a page (trafilatura, needs `labkit[web]`), size-capped, never raises; GitHub repo links give the README. Public addresses only: a host or redirect hop resolving to a private, loopback, link-local or Tailscale address gives `None` (`allow_private=True` to opt out) |
 | `labkit.scrape` | Scraping through the Evomi residential proxy, never the home IP: `ProxyFetcher` (httpx), `BrowserFetcher` (a headed Chromium under Xvfb, needs `labkit[scrape]`; can block images and fonts), `allow_hosts` keeps only the site's own requests, `engine="patchright"` (`labkit[stealth]`) passes Cloudflare challenges that stock Playwright does not, `raw=True` returns a JSON API's body; `capture="<url part>"` returns the body of the page's own data call (a single-page app's XHR) instead of its HTML; `screenshot(url, prepare=)` returns a PNG of the settled page and its HTML (prepare dismisses a cookie banner); both paced and counting proxy bytes; `RawLog` keeps gzipped copies of the pages; `SourceUnavailable` / `SourceDrift` |
@@ -20,14 +21,14 @@ so each project stops carrying its own copy.
 Pinned to a release tarball, so slim Docker images need no `git`:
 
 ```
-labkit @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.8.0.tar.gz
-labkit[web] @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.8.0.tar.gz
+labkit @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.9.0.tar.gz
+labkit[web] @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.9.0.tar.gz
 ```
 
 As an agent tool (one install for every agent on the machine):
 
 ```
-uv tool install "labkit[mcp] @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.8.0.tar.gz"
+uv tool install "labkit[mcp] @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.9.0.tar.gz"
 claude mcp add --scope user reddit -- ~/.local/bin/labkit-reddit-mcp
 ```
 
