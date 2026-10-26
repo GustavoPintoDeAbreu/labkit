@@ -12,6 +12,7 @@ so each project stops carrying its own copy.
 | `labkit.web` | `fetch_page(url)`: readable text of a page (trafilatura, needs `labkit[web]`), size-capped, never raises; GitHub repo links give the README. Public addresses only: a host or redirect hop resolving to a private, loopback, link-local or Tailscale address gives `None` (`allow_private=True` to opt out) |
 | `labkit.scrape` | Scraping through the Evomi residential proxy, never the home IP: `ProxyFetcher` (httpx), `BrowserFetcher` (a headed Chromium under Xvfb, needs `labkit[scrape]`; can block images and fonts), `allow_hosts` keeps only the site's own requests, `engine="patchright"` (`labkit[stealth]`) passes Cloudflare challenges that stock Playwright does not, `raw=True` returns a JSON API's body; `capture="<url part>"` returns the body of the page's own data call (a single-page app's XHR) instead of its HTML; `screenshot(url, prepare=)` returns a PNG of the settled page and its HTML (prepare dismisses a cookie banner); both paced and counting proxy bytes; `RawLog` keeps gzipped copies of the pages; `SourceUnavailable` / `SourceDrift` |
 | `labkit-reddit-mcp` | A stdio MCP server (`labkit[mcp]`) so coding agents can read a Reddit link: `read_reddit_post(url, comments=8, linked_pages=3, image=false)` returns the post, top comments and the text of linked pages (GitHub repos give their README) as Markdown, plus the picture of an image post on request. The 65 s pacing is shared by every agent process through a lock file, results are cached for an hour (`~/.cache/labkit/reddit`, `LABKIT_REDDIT_CACHE`), and a refusal is reported, never retried |
+| `labkit.youtube` | `fetch_video(url, out_dir, screenshots=8)` (`labkit[youtube]`): title, channel, description, chapters and the transcript (manual or auto captions, through yt-dlp), plus at most 10 timestamped screenshots (chapter starts, scene changes, then evenly spaced) saved in `out_dir`; `to_markdown()`; `python -m labkit.youtube URL --out DIR` prints what it read. ffmpeg comes from PATH or the bundled `imageio-ffmpeg` |
 | `labkit deploy-pi` | Ship a repo's `deploy/pi` compose project to the Pi: clean-tree guard, version stamp, rsync, build and restart |
 | `labkit init` | Join a repo to the lab: `AGENTS.md` (with the Lab block), `CLAUDE.md` → `@AGENTS.md`, and a `lab.yaml` skeleton |
 | `labkit install-skills` | Agent skills (`send-whatsapp`, `use-llm-broker`, `deploy-to-pi`, `new-lab-project`) into `~/.claude/skills` |
@@ -21,14 +22,15 @@ so each project stops carrying its own copy.
 Pinned to a release tarball, so slim Docker images need no `git`:
 
 ```
-labkit @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.9.0.tar.gz
-labkit[web] @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.9.0.tar.gz
+labkit @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.10.0.tar.gz
+labkit[web] @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.10.0.tar.gz
+labkit[youtube] @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.10.0.tar.gz
 ```
 
 As an agent tool (one install for every agent on the machine):
 
 ```
-uv tool install "labkit[mcp] @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.9.0.tar.gz"
+uv tool install "labkit[mcp] @ https://github.com/GustavoPintoDeAbreu/labkit/archive/refs/tags/v0.10.0.tar.gz"
 claude mcp add --scope user reddit -- ~/.local/bin/labkit-reddit-mcp
 ```
 

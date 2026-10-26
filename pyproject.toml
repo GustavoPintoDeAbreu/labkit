@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "labkit"
-version = "0.9.0"
-description = "Small shared pieces for Gustavo's homelab projects: WhatsApp via WAHA, the local LLM broker, Pi deploys, project scaffolding, agent skills, Reddit RSS reader, readable web page text, scraping through a residential proxy."
+version = "0.10.0"
+description = "Small shared pieces for Gustavo's homelab projects: WhatsApp via WAHA, the local LLM broker, Pi deploys, project scaffolding, agent skills, Reddit RSS reader, readable web page text, scraping through a residential proxy, YouTube video reader (transcript, screenshots)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -16,6 +16,7 @@ web = ["trafilatura>=2.0"]
 scrape = ["playwright>=1.55"]
 stealth = ["patchright>=1.55"]
 mcp = ["mcp>=2.2,<3", "trafilatura>=2.0"]
+youtube = ["yt-dlp[default]>=2025.1", "imageio-ffmpeg>=0.5"]
 test = ["pytest>=8", "pyyaml>=6", "trafilatura>=2.0", "mcp>=2.2,<3"]
 
 [project.scripts]
