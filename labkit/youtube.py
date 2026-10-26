@@ -181,7 +181,7 @@ def video_id(url: str) -> str | None:
         parts = [p for p in u.path.split("/") if p]
         if len(parts) >= 2 and parts[0] == "embed":
             candidate = parts[1]
-    return candidate if _ID.match(candidate) else None
+    return candidate if _ID.fullmatch(candidate) else None  # fullmatch: "$" alone allows a trailing \n
 
 
 def is_youtube_url(url: str) -> bool:
@@ -399,9 +399,10 @@ def fetch_video(url: str, out_dir: str | Path | None = None, *, screenshots: int
     """Read one YouTube video: metadata, chapters, transcript and up to ``screenshots`` JPEGs.
 
     Raises NotYoutubeLink for links that are not videos and VideoUnreadable when yt-dlp
-    cannot read the video itself; every other problem (no captions, no ffmpeg, a too-long
-    or live video, a failed download) becomes a warning on the returned Video.
-    ``out_dir=None`` means transcript only."""
+    cannot read the video itself, or for a live stream; every other problem (no captions,
+    no ffmpeg, a too-long video, a failed download) becomes a warning on the returned Video.
+    A failed combined download is retried for captions alone, so a video that offers no usable
+    stream still gives its transcript. ``out_dir=None`` means transcript only."""
     vid = video_id(url)
     if vid is None:
         raise NotYoutubeLink(f"not a YouTube video link: {url}")
@@ -461,11 +462,19 @@ def fetch_video(url: str, out_dir: str | Path | None = None, *, screenshots: int
                 dl.download(canonical, work, caption=caption, video=want_video, max_height=max_height)
             except VideoUnreadable as e:
                 warnings.append(f"download failed: {e}")
+                if want_video and caption is not None:
+                    # yt-dlp picks the format before writing subtitles, so "no format matches"
+                    # (a YouTube that needs Deno/yt-dlp-ejs) also loses the .vtt: retry for
+                    # captions only, which keeps the transcript even without screenshots.
+                    try:
+                        dl.download(canonical, work, caption=caption, video=False, max_height=max_height)
+                    except VideoUnreadable as e2:
+                        warnings.append(f"captions could not be fetched alone: {e2}")
 
             vtts = sorted(work.glob("*.vtt"))
             if caption and not vtts:
                 warnings.append("captions could not be downloaded")
-            elif vtts:
+            elif vtts and caption is not None:  # a .vtt without a picked track is ignored
                 cues = parse_vtt(vtts[0].read_text(encoding="utf-8", errors="replace"))
                 if cues:
                     video.transcript = cues

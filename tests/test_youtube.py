@@ -114,6 +114,7 @@ def test_video_id_accepts(url, want):
     "https://www.youtube.com/watch?v=short", "https://youtu.be/",
     "https://notyoutube.com/watch?v=z2K0nXa-dUg", "https://evil.com/youtu.be/z2K0nXa-dUg",
     "https://www.reddit.com/r/x/comments/abc/", "ftp://youtu.be/z2K0nXa-dUg",
+    "https://www.youtube.com/watch?v=abcDEF12345%0A",  # %0A decodes to a trailing newline
 ])
 def test_video_id_rejects(url):
     assert video_id(url) is None
@@ -357,6 +358,43 @@ def test_fetch_video_download_error_is_a_warning(tmp_path):
     assert any("download failed: HTTP 403" in w for w in v.warnings)
     assert v.transcript == []
     assert "captions could not be downloaded" in v.warnings
+
+
+def test_fetch_video_no_formats_falls_back_to_captions(tmp_path):
+    class NoFormats(FakeDownloader):
+        def download(self, url, work, *, caption, video, max_height):
+            self.calls.append(("download", url, caption, video, max_height))
+            if video:
+                raise VideoUnreadable("Requested format is not available")  # no format matches
+            (Path(work) / f"media.{caption[0]}.vtt").write_text(self.vtt)   # captions only
+
+    run, _calls = fake_runner(SCENES)
+    dl = NoFormats(info())
+    v = fetch_video("https://youtu.be/abcDEF12345", tmp_path / "shots", screenshots=4, downloader=dl, runner=run,
+                    ffmpeg="ffmpeg")
+    assert any("download failed: Requested format is not available" in w for w in v.warnings)
+    assert v.transcript == [Cue(0.0, "hello world"), Cue(2.01, "this is Next.js"),
+                            Cue(35.0, "and Tailwind & shadcn")]
+    assert v.transcript_source == "auto" and v.transcript_lang == "en"
+    assert v.screenshots == []
+    assert any("video could not be downloaded" in w for w in v.warnings)
+    assert [c[3] for c in dl.calls if c[0] == "download"] == [True, False]  # combined, then captions only
+
+
+def test_fetch_video_stray_vtt_without_a_picked_caption(tmp_path):
+    class WritesVttAnyway(FakeDownloader):
+        def download(self, url, work, *, caption, video, max_height):
+            self.calls.append(("download", url, caption, video, max_height))
+            (Path(work) / "media.en.vtt").write_text(self.vtt)  # ignores caption=None
+            if video and self.make_video:
+                (Path(work) / "media.mp4").write_bytes(b"fake")
+
+    run, _calls = fake_runner(SCENES)
+    dl = WritesVttAnyway(info(automatic_captions={}))
+    v = fetch_video("https://youtu.be/abcDEF12345", tmp_path / "shots", screenshots=4, downloader=dl, runner=run,
+                    ffmpeg="ffmpeg")
+    assert v.transcript == [] and v.transcript_source == "" and v.transcript_lang == ""
+    assert len(v.screenshots) == 4
 
 
 # --- rendering ------------------------------------------------------------------
