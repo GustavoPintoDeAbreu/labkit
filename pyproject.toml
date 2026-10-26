@@ -9,7 +9,7 @@ description = "Small shared pieces for Gustavo's homelab projects: WhatsApp via 
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-dependencies = ["httpx>=0.27"]
+dependencies = ["httpx>=0.27", "certifi>=2026.10.19"]
 
 [project.optional-dependencies]
 web = ["trafilatura>=2.0"]
