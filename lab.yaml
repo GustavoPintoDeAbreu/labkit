@@ -2,7 +2,7 @@
 # query it through the `lab` MCP). This repo is PUBLIC: no addresses, ports,
 # hosts or secrets here; refer to services by id.
 product: labkit
-summary: "Shared Python package for the lab's projects: WhatsApp via WAHA, the local LLM broker client, Pi deploys, project scaffolding and agent skills, a Reddit RSS reader, web page text and residential-proxy scraping. Use it instead of copying code between repos."
+summary: "Shared Python package for the lab's projects: WhatsApp via WAHA, the local LLM broker client, Pi deploys, project scaffolding and agent skills, a Reddit RSS reader, web page text, residential-proxy scraping and a YouTube reader. Use it instead of copying code between repos."
 repo: GustavoPintoDeAbreu/labkit
 provides:
   - {id: labkit.waha, kind: lib, path: labkit/waha.py, summary: "Send WhatsApp text and voice notes (OGG/Opus) through WAHA: Notifier interface, MockNotifier twin, WahaNotifier with retry on 5xx/connection errors and fail-fast on 4xx"}
@@ -14,6 +14,7 @@ provides:
   - {id: labkit.reddit, kind: lib, path: labkit/reddit.py, summary: "Reddit through public RSS only (honest User-Agent, 65 s pacing, stop on 403/429): fetch_post(url) reads a post from www/old/m permalinks, redd.it and app /s/ share links with its top comments and outbound links; RedditRSS.top() for listings"}
   - {id: labkit.web, kind: lib, path: labkit/web.py, summary: "fetch_page(url): readable text of a web page via trafilatura (labkit[web]), size cap, never raises, skips Reddit and media hosts, refuses private/LAN/Tailscale addresses (each redirect hop checked); GitHub repo links return the README"}
   - {id: cli.reddit-mcp, kind: cli, path: labkit/reddit_mcp.py, summary: "labkit-reddit-mcp (labkit[mcp]): stdio MCP server with read_reddit_post(url) for coding agents (Claude Code, claude-local, qcode): post, top comments, linked pages (GitHub READMEs), optional image; 65 s pacing shared across processes, 1 h cache, stops when Reddit refuses"}
+  - {id: labkit.youtube, kind: lib, path: labkit/youtube.py, summary: "fetch_video(url, out_dir, screenshots=8): a YouTube video's (youtube.com, youtu.be, ?si= share links, shorts) title, channel, description, chapters and transcript (manual or auto captions via yt-dlp, labkit[youtube]) plus at most 10 timestamped JPEG screenshots chosen by chapter start, scene change, then even spacing; to_markdown() for prompts; python -m labkit.youtube URL --out DIR prints what it read"}
   - {id: labkit.scrape, kind: lib, path: labkit/scrape.py, summary: "Scraping through the Evomi residential proxy (never the home IP): ProxyFetcher (httpx) and BrowserFetcher (headed Chromium on Xvfb, labkit[scrape], optional image/font blocking and host allow-list; engine=patchright via labkit[stealth] passes Idealista's Cloudflare; screenshot() returns a PNG of the settled page), paced, counting proxy bytes for a daily cap; RawLog gzipped page log; SourceUnavailable/SourceDrift. Lifted from price-scout"}
 uses: [svc.kaya-waha, svc.llm-broker, host.pi]
 docs:

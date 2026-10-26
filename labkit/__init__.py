@@ -4,9 +4,10 @@
 - ``labkit.broker``: the local LLM broker (chat, tool calls, what is loaded, unload).
 - ``labkit.reddit``: read Reddit posts and listings through the public RSS feeds (paced, stops when refused).
 - ``labkit-reddit-mcp`` (``labkit[mcp]``): a stdio MCP server so coding agents can read Reddit posts.
+- ``labkit.youtube``: a YouTube video's metadata, chapters, transcript and up to 10 screenshots (``labkit[youtube]``).
 - ``labkit.web``: readable text of a web page (``labkit[web]`` for trafilatura); GitHub repos give their README.
 - ``labkit.scrape``: fetch pages through the Evomi residential proxy, plain or in a headed browser (``labkit[scrape]``), with a raw-page log.
 - ``labkit deploy-pi``: ship a compose project to the Raspberry Pi.
 - ``labkit init`` / ``labkit install-skills``: join a repo, or an agent, to the lab.
 """
-__version__ = "0.9.0"
+__version__ = "0.10.0"
