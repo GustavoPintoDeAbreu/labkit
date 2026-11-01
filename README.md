@@ -39,9 +39,11 @@ claude mcp add --scope user reddit -- ~/.local/bin/labkit-reddit-mcp
 ## Develop
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e ".[test]"
+uv venv && uv pip install -e ".[test]"
 .venv/bin/pytest -q
 ```
+
+The venv is made by uv and has no pip: add packages with `uv pip install ...`.
 
 A release is a tag (`vX.Y.Z`, matching `pyproject.toml` and `labkit/__init__.py`). Projects
 bump their pin on purpose; nothing follows `main`.
