@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import httpx
 
@@ -86,3 +86,49 @@ def running(url: Optional[str] = None, timeout_s: float = 10) -> List[Dict[str, 
 def unload(model: str, url: Optional[str] = None, timeout_s: float = 60) -> None:
     """Free one model's VRAM now. Only unload your own model; never evict someone else's."""
     httpx.post(f"{broker_url(url)}/api/models/unload/{model}", timeout=timeout_s).raise_for_status()
+
+
+class FollowLoaded:
+    """An LLM that uses a capable model which is already loaded instead of swapping to ``default``.
+
+    Each call picks: ``default`` if it is loaded, else the first of ``follow`` that is loaded,
+    else ``default`` (which then loads). Only a model that is already loaded is followed, so it
+    never pulls a two-card model back over Kaya's card. 2026-11-11: two chat sessions on two
+    Flash-Next variants plus lab-assistant/lab-browser on qwen-impl made the broker swap on every
+    request (50 to 130 s per call); following the loaded Flash-Next removes the third swap.
+    Same interface as ``LLM`` (complete, complete_tools, chat); ``model`` is the last pick."""
+
+    def __init__(self, default: str, follow: Sequence[str], url: Optional[str] = None,
+                 loaded: Optional[Callable[[], List[str]]] = None, **kw: Any):
+        self.default, self.follow, self.url, self.kw = default, [m for m in follow if m and m != default], url, kw
+        self._loaded = loaded or self._ready
+        self._llms: Dict[str, Any] = {}
+        self.model = default
+
+    def _ready(self) -> List[str]:
+        try:
+            return [r.get("model") for r in running(self.url, timeout_s=3)
+                    if isinstance(r, dict) and r.get("state", "ready") == "ready"]
+        except Exception:  # noqa: BLE001 - broker unreachable: the default, as before
+            return []
+
+    def pick(self) -> str:
+        ready = set(self._loaded())
+        if self.default in ready:
+            return self.default
+        return next((m for m in self.follow if m in ready), self.default)
+
+    def llm(self) -> Any:
+        self.model = self.pick()
+        if self.model not in self._llms:
+            self._llms[self.model] = LLM.for_model(self.model, url=self.url, **self.kw)
+        return self._llms[self.model]
+
+    def complete(self, messages: List[Dict[str, str]], **kw: Any) -> str:
+        return self.llm().complete(messages, **kw)
+
+    def complete_tools(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]], **kw: Any) -> Dict[str, Any]:
+        return self.llm().complete_tools(messages, tools, **kw)
+
+    def chat(self, system: str, user: str, **kw: Any) -> str:
+        return self.llm().chat(system, user, **kw)
