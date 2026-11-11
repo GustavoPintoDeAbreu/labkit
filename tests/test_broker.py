@@ -73,3 +73,16 @@ def test_app_name_goes_in_the_user_agent():
     llm = broker.LLM.for_model("qwen-impl", url="http://b", app="subs-llm-translation")
     assert llm._client.headers["User-Agent"] == "subs-llm-translation"
     assert "python-httpx" in broker.LLM.for_model("qwen-impl", url="http://b")._client.headers["User-Agent"]
+
+
+def test_follow_loaded_uses_a_loaded_capable_model_never_loads_one():
+    from labkit.broker import FollowLoaded
+    now = {"models": ["qwen-flash-strata-g1"]}
+    f = FollowLoaded("qwen-impl", ["qwen-flash-strata-g1", "qwen-flash-g1"], loaded=lambda: now["models"])
+    assert f.pick() == "qwen-flash-strata-g1"
+    now["models"] = ["qwen-impl", "qwen-flash-g1"]
+    assert f.pick() == "qwen-impl"                       # the default when it is there
+    now["models"] = ["kaya", "big"]
+    assert f.pick() == "qwen-impl"                       # nothing to follow: the default loads
+    now["models"] = ["qwen-flash-g1"]
+    assert f.llm().model == "qwen-flash-g1" and f.model == "qwen-flash-g1"
