@@ -37,6 +37,25 @@ IMAGE_EXT = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 BOT_AUTHORS = {"automoderator", "[deleted]"}
 REDDIT_HOSTS = ("reddit.com", "redd.it")          # NEW: subdomains count too
 MAX_REDIRECT_HOPS = 3                             # NEW
+SORTS = ("hot", "new", "rising", "top", "controversial")
+_MULTI = re.compile(r"/?(?:user|u)/([\w-]+)/m/([\w-]+)", re.I)
+_SUBS = re.compile(r"/?r/([\w+]+)", re.I)
+
+
+def source_of(text: str) -> dict:
+    """A feed from what a user or agent writes: a multireddit link or path
+    (reddit.com/user/X/m/Y, /u/X/m/Y) or subreddits (r/A, r/A+B, "A, B")."""
+    t = (text or "").strip()
+    m = _MULTI.search(t)
+    if m:
+        return {"multi": {"user": m.group(1), "name": m.group(2)}}
+    m = _SUBS.search(t)
+    if m:
+        return {"subreddits": [x for x in m.group(1).split("+") if x]}
+    subs = [x.strip().lstrip("r/") for x in re.split(r"[,+\s]+", t) if x.strip()]
+    if subs and all(re.fullmatch(r"[\w-]+", x) for x in subs):
+        return {"subreddits": subs}
+    raise ValueError(f"not a subreddit or multireddit: {text!r}")
 
 _PERMALINK = re.compile(r"^/r/([A-Za-z0-9_]+)/comments/([A-Za-z0-9]+)(?:/|$)")   # NEW
 _SHARE = re.compile(r"^/r/[A-Za-z0-9_]+/s/[A-Za-z0-9_-]+/?$")                    # NEW
@@ -357,6 +376,22 @@ class RedditRSS:
         raise RedditBlocked(url, 429, "rate limited after retries")
 
     @staticmethod
+    def listing_url(source: dict, sort: str = "hot", timeframe: str = "week", limit: int = 25) -> str:
+        """A feed's RSS path: ``source`` is ``{"multi": {"user", "name"}}`` (a multireddit /
+        Custom Feed; public ones only, RSS is logged out) or ``{"subreddits": [...]}``."""
+        if sort not in SORTS:
+            raise ValueError(f"sort must be one of {SORTS}")
+        m = source.get("multi")
+        if m:
+            base = f"/user/{m['user']}/m/{m['name']}"
+        elif source.get("subreddits"):
+            base = f"/r/{'+'.join(source['subreddits'])}"
+        else:
+            raise ValueError(f"multi {source.get('name')!r} has neither 'multi' nor 'subreddits'")
+        query = f"?limit={max(1, min(int(limit), 100))}" + (f"&t={timeframe}" if sort in ("top", "controversial") else "")
+        return f"{base}/{sort}/.rss{query}"
+
+    @staticmethod
     def top_url(source: dict, timeframe: str = "week") -> str:
         m = source.get("multi")
         if m:
@@ -368,6 +403,10 @@ class RedditRSS:
 
     def top(self, source: dict, timeframe: str = "week") -> list[Post]:
         return parse_listing(self._get(self.top_url(source, timeframe)))
+
+    def listing(self, source: dict, sort: str = "hot", timeframe: str = "week", limit: int = 25) -> list[Post]:
+        """One paced request: a subreddit's, several subreddits' or a multireddit's posts."""
+        return parse_listing(self._get(self.listing_url(source, sort, timeframe, limit)))
 
     def comments(self, post: Post, limit: int) -> list[Comment]:
         path = urlparse(post.permalink).path.rstrip("/")

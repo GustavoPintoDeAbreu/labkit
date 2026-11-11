@@ -153,6 +153,40 @@ def read_post(url: str, comments: int = 8, linked_pages: int = 3, *, rss: Reddit
     return result
 
 
+LISTING_TTL_S = 600
+
+
+def read_listing(source: str, sort: str = "hot", limit: int = 15, *, rss: RedditRSS | None = None,
+                 cache_dir: Path | None = None, now: Callable[[], float] = time.time) -> str:
+    """A feed's posts as markdown (rank, title, subreddit, author, kind, link), cached 10 min."""
+    from labkit.reddit import source_of
+    src = source_of(source)
+    limit = max(1, min(int(limit), 50))
+    cache_dir = Path(cache_dir or CACHE_DIR)
+    key = hashlib.sha1(f"listing|{json.dumps(src, sort_keys=True)}|{sort}|{limit}".encode()).hexdigest()
+    cached = cache_dir / f"{key}.json"
+    try:
+        hit = json.loads(cached.read_text())
+        if now() - hit["at"] < LISTING_TTL_S:
+            return hit["text"]
+    except (OSError, ValueError, KeyError):
+        pass
+    rss = rss or SharedPaceRSS(USER_AGENT, cache_dir / "last")
+    posts = rss.listing(src, sort=sort, limit=limit)[:limit]
+    name = (f"/user/{src['multi']['user']}/m/{src['multi']['name']}" if "multi" in src
+            else "r/" + "+".join(src["subreddits"]))
+    lines = [f"# {name} — {sort} ({len(posts)} posts)"]
+    for p in posts:
+        lines.append(f"{p.rank}. {p.title} — r/{p.subreddit}, u/{p.author}, {p.kind}, {p.published[:10]}\n   {p.permalink}")
+    text = "\n".join(lines)
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cached.write_text(json.dumps({"at": now(), "text": text}))
+    except OSError:
+        pass
+    return text
+
+
 def fetch_image(url: str, client: httpx.Client | None = None) -> tuple[bytes, str] | None:
     """(bytes, format) of a post's picture, at most IMAGE_BYTES; None if it can't be had."""
     # No redirects: image_url() only names known image hosts, and a hop could lead anywhere.
@@ -211,6 +245,20 @@ def main() -> None:
         if picture is None:
             return result["text"] + f"\n\n(Could not download the image: {result['image_url']})"
         return [result["text"], Image(data=picture[0], format=picture[1])]
+
+    @server.tool(name="read_reddit_listing",
+                 description="A subreddit's, several subreddits' or a multireddit's (Custom Feed's) posts: rank, "
+                             "title, subreddit, author, kind and link. source: r/LocalLLaMA, r/A+B, or a multireddit "
+                             "link/path such as reddit.com/user/NAME/m/FEED (public feeds only). sort: hot, new, "
+                             "rising, top. limit: 1-50 (default 15). One paced request (~65 s at worst); cached 10 min. "
+                             "Then read_reddit_post for a post's body and comments.",
+                 annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False,
+                                             idempotent_hint=True, open_world_hint=True))
+    def read_reddit_listing(source: str, sort: str = "hot", limit: int = 15):
+        try:
+            return read_listing(source, sort, limit)
+        except (RedditError, ValueError) as e:
+            return f"Could not read {source}: {e}. A private feed needs his logged-in browser."
 
     server.run("stdio")
 
