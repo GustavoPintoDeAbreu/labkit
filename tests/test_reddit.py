@@ -392,3 +392,24 @@ def test_read_listing_renders_and_caches(tmp_path):
     assert text.startswith("# /user/someone/m/ai — hot (1 posts)") and "I built a tiny agent" in text
     again = read_listing("reddit.com/user/someone/m/ai", "hot", 5, rss=None, cache_dir=tmp_path, now=lambda: 60)
     assert again == text                       # from the cache, no request
+
+
+COMMENT_FEED = """<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">
+<entry><category term="LocalLLaMA"/><content type="html">&lt;div class="md"&gt;&lt;p&gt;Can't people just wait? Did the 27b stop working suddenly?&lt;/p&gt;&lt;/div&gt;</content>
+<link href="https://www.reddit.com/r/LocalLLaMA/comments/abc/x/def/"/><title>/u/someone on Qwen4 open weights not soon?</title>
+<updated>2026-11-11T12:09:42+00:00</updated></entry>
+<entry><category term="Games"/><content type="html">&lt;p&gt;ok&lt;/p&gt;</content>
+<link href="https://www.reddit.com/r/Games/comments/x/y/z/"/><title>/u/someone on Short</title><updated>2026-11-10T10:00:00+00:00</updated></entry>
+</feed>"""
+
+
+def test_user_comments_and_voice_samples(tmp_path):
+    from labkit.voice import samples
+    r, _ = client([(200, COMMENT_FEED, {})])
+    got = r.user_comments("someone", 10)
+    assert got[0].subreddit == "LocalLLaMA" and got[0].post_title == "Qwen4 open weights not soon?"
+    assert got[0].text.startswith("Can't people just wait?")
+    r2, _ = client([(200, COMMENT_FEED, {})])
+    s = samples("someone", rss=r2, cache_dir=tmp_path, now=lambda: 0)
+    assert len(s) == 1 and s[0]["post"] == "Qwen4 open weights not soon?"      # "ok" is too short to imitate
+    assert samples("someone", rss=None, cache_dir=tmp_path, now=lambda: 3600) == s   # cached, no request

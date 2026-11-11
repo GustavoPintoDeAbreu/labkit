@@ -299,6 +299,30 @@ def parse_post(xml: str, comments: int = 8) -> Post:            # NEW
     raise PostUnreadable("the feed has no post entry")
 
 
+@dataclass
+class UserComment:
+    subreddit: str        # "LocalLLaMA"
+    post_title: str       # the post the comment answers
+    text: str             # plain text
+    permalink: str
+    published: str
+
+
+def parse_user_comments(xml: str) -> list[UserComment]:
+    """A user's comments feed (``/user/<name>/comments/.rss``): one entry per comment."""
+    out = []
+    for e in _entries(xml):
+        body, _, _ = _parse_content(_field(e, "a:content"))
+        title = html.unescape(_field(e, "a:title"))
+        cat = e.find("a:category", ATOM)
+        link = e.find("a:link", ATOM)
+        out.append(UserComment(subreddit=cat.get("term", "") if cat is not None else "",
+                               post_title=re.sub(r"^/u/\S+ on ", "", title), text=body.strip(),
+                               permalink=link.get("href", "") if link is not None else "",
+                               published=_field(e, "a:updated") or _field(e, "a:published")))
+    return out
+
+
 class RedditError(Exception):                                     # NEW
     """Base: Reddit refused, or the post could not be read."""
 
@@ -403,6 +427,10 @@ class RedditRSS:
 
     def top(self, source: dict, timeframe: str = "week") -> list[Post]:
         return parse_listing(self._get(self.top_url(source, timeframe)))
+
+    def user_comments(self, user: str, limit: int = 25) -> list[UserComment]:
+        """A user's latest public comments (one paced request)."""
+        return parse_user_comments(self._get(f"/user/{user}/comments/.rss?limit={max(1, min(int(limit), 100))}"))
 
     def listing(self, source: dict, sort: str = "hot", timeframe: str = "week", limit: int = 25) -> list[Post]:
         """One paced request: a subreddit's, several subreddits' or a multireddit's posts."""
