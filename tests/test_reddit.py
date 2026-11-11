@@ -359,3 +359,36 @@ def test_default_client_and_user_agent():
     assert r._client.follow_redirects is True
     with pytest.raises(ValueError):
         RedditRSS("  ")
+
+
+# --- listings (hot/new/rising feeds, multireddits) ---------------------------
+
+def test_listing_urls_and_sources():
+    from labkit.reddit import source_of
+    ai = source_of("https://www.reddit.com/user/someone/m/ai/")
+    assert ai == {"multi": {"user": "someone", "name": "ai"}}
+    assert RedditRSS.listing_url(ai) == "/user/someone/m/ai/hot/.rss?limit=25"
+    assert RedditRSS.listing_url(source_of("r/LocalLLaMA+LocalLLM"), "rising", limit=10) == \
+        "/r/LocalLLaMA+LocalLLM/rising/.rss?limit=10"
+    assert RedditRSS.listing_url(source_of("LocalLLaMA, ollama"), "top", "day") == "/r/LocalLLaMA+ollama/top/.rss?limit=25&t=day"
+    with pytest.raises(ValueError):
+        RedditRSS.listing_url(ai, "best")
+    with pytest.raises(ValueError):
+        source_of("what is this?")
+
+
+def test_listing_fetches_one_feed():
+    seen = []
+    r, _ = client([(200, feed(entry("t3_abc123", "alice", PERMALINK, POST_HTML, title="I built a tiny agent")), {})],
+                  seen=seen)
+    posts = r.listing({"multi": {"user": "someone", "name": "ai"}}, "new", limit=5)
+    assert posts[0].title == "I built a tiny agent" and seen[0].endswith("/user/someone/m/ai/new/.rss?limit=5")
+
+
+def test_read_listing_renders_and_caches(tmp_path):
+    from labkit.reddit_mcp import read_listing
+    r, _ = client([(200, feed(entry("t3_abc123", "alice", PERMALINK, POST_HTML, title="I built a tiny agent")), {})])
+    text = read_listing("reddit.com/user/someone/m/ai", "hot", 5, rss=r, cache_dir=tmp_path, now=lambda: 0)
+    assert text.startswith("# /user/someone/m/ai — hot (1 posts)") and "I built a tiny agent" in text
+    again = read_listing("reddit.com/user/someone/m/ai", "hot", 5, rss=None, cache_dir=tmp_path, now=lambda: 60)
+    assert again == text                       # from the cache, no request
