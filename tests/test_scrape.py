@@ -336,6 +336,16 @@ def test_capture_falls_back_to_the_page_when_the_call_never_comes():
     assert f.get("https://b/deeplink", tag="t") == "<app-root></app-root>"
 
 
+def test_capture_by_regex_skips_a_call_that_shares_the_stem():
+    """Zome calls .../rpc/get_angariacoes_total (a count) before .../rpc/get_angariacoes (the list)."""
+    import re
+    total = FakeRequest("https://s/rest/v1/rpc/get_angariacoes_total", "xhr", 1, 1, text="48")
+    data = FakeRequest("https://s/rest/v1/rpc/get_angariacoes", "xhr", 1, 1, text="[1]")
+    f, page, *_ = make({"https://z/p": (200, "<div></div>", [total, data])}, [],
+                       capture=re.compile(r"rpc/get_angariacoes$"))
+    assert f.get("https://z/p", tag="t") == "[1]"
+
+
 def test_capture_is_per_get():
     data = FakeRequest("https://b/avail?1", "xhr", 1, 1, text="first")
     f, page, *_ = make({"https://b/1": (200, "one", [data]), "https://b/2": (200, "two", [])}, [], capture="avail")

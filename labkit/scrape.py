@@ -250,7 +250,7 @@ class BrowserFetcher(_Paced):
     def __init__(self, user: str, password: str, *, country: str = "PT", delay_s: float = 5.0,
                  raw_log: RawLog | None = None, ready_selector: str | None = None,
                  block_resources: tuple[str, ...] = (), allow_hosts: tuple[str, ...] = (),
-                 capture: str | None = None,
+                 capture: "str | re.Pattern | None" = None,
                  engine: str = "playwright",
                  launch: Callable[..., tuple] = _launch_playwright,
                  sleep=time.sleep, clock=time.monotonic, rng: random.Random | None = None):
@@ -266,6 +266,8 @@ class BrowserFetcher(_Paced):
         # ``get`` returns the body of the first response whose URL contains it (the
         # page's own data call, e.g. a booking engine's availability JSON) instead of
         # the HTML. If none arrives within CAPTURE_TIMEOUT_MS it returns the HTML.
+        # A compiled regex is searched in the URL instead: for two calls whose URLs share a
+        # stem (Zome's ".../rpc/get_angariacoes" and ".../rpc/get_angariacoes_total").
         self.capture = capture
         self._captured: list = []
         if engine not in ("playwright", "patchright"):
@@ -296,7 +298,7 @@ class BrowserFetcher(_Paced):
                 self._page.on("requestfinished", lambda request: self._finished.append(request))  # Playwright wraps Python callables only
                 if self.capture:
                     self._page.on("response", lambda response: self._captured.append(response)
-                                  if self.capture in response.url else None)
+                                  if self._wanted(response.url) else None)
             except Exception as e:  # noqa: BLE001 - no browser means the source is unavailable
                 self.close()
                 raise SourceUnavailable(f"browser did not start: {e}") from e
@@ -374,6 +376,11 @@ class BrowserFetcher(_Paced):
             raise SourceUnavailable(f"screenshot failed: {type(e).__name__}: {str(e)[:200]}") from e
         finally:
             self._count()
+
+    def _wanted(self, url: str) -> bool:
+        if isinstance(self.capture, re.Pattern):
+            return self.capture.search(url) is not None
+        return self.capture in url
 
     def _captured_body(self, page) -> str:
         """The captured data call's body, waiting for it; the rendered page if it never came."""
