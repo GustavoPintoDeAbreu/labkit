@@ -1,11 +1,11 @@
-"""``labkit``: deploy-pi, init, install-skills."""
+"""``labkit``: deploy-pi, init, install-skills, vet."""
 from __future__ import annotations
 
 import argparse
 import sys
 from typing import List, Optional
 
-from labkit import __version__, deploy_pi, scaffold
+from labkit import __version__, deploy_pi, repovet, scaffold
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -14,6 +14,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     deploy_pi.add_parser(sub)
     scaffold.add_parsers(sub)
+    repovet.add_parser(sub)
     args = ap.parse_args(argv)
     return args.func(args) or 0
 
