@@ -76,10 +76,46 @@ class Fetcher(Protocol):
     def get(self, url: str, *, tag: str, platform: str = "page") -> str: ...
 
 
+# Who answered a block, from the refusal's own body and headers: the message names it
+# ("blocked 403 (cloudflare)") so a source's log tells a Cloudflare wall from DataDome's.
+VENDOR_MARKERS = (
+    ("cloudflare", ("just a moment", "challenges.cloudflare.com", "cf-chl", "cf-mitigated", "attention required")),
+    ("datadome", ("captcha-delivery.com", "datadome")),
+    ("akamai", ("akamai", "reference #")),
+)
+
+
+def block_vendor(body: str = "", headers: dict | None = None) -> str | None:
+    """The bot wall behind a refusal (cloudflare, datadome, akamai), or None when unknown."""
+    low = (body or "")[:20_000].lower() + " " + " ".join(f"{k}:{v}" for k, v in (headers or {}).items()).lower()
+    for name, markers in VENDOR_MARKERS:
+        if any(m in low for m in markers):
+            return name
+    return None
+
+
+def _blocked(status: int, body: str = "", headers: dict | None = None) -> SourceUnavailable:
+    vendor = block_vendor(body, headers)
+    return SourceUnavailable(f"blocked {status}" + (f" ({vendor})" if vendor else ""))
+
+
 def looks_blocked(html: str) -> bool:
     """True when the page looks like a bot-check wall."""
     low = html.lower()
     return any(marker in low for marker in BLOCK_MARKERS)
+
+
+def _response_parts(response) -> tuple[str, dict]:
+    """A browser response's body and headers, as far as they can be read (a refusal may have neither)."""
+    try:
+        body = response.text()
+    except Exception:  # noqa: BLE001
+        body = ""
+    try:
+        headers = dict(response.headers or {})
+    except Exception:  # noqa: BLE001
+        headers = {}
+    return body, headers
 
 
 class RawLog:
@@ -167,12 +203,24 @@ class ProxyFetcher(_Paced):
         # Bytes on the wire (compressed); a response built in memory has none, so its body counts.
         self.bytes_used += r.num_bytes_downloaded or len(r.content)
         if r.status_code in (403, 429, 503):
-            raise SourceUnavailable(f"blocked {r.status_code}")
+            raise _blocked(r.status_code, r.text, dict(r.headers))
         if r.status_code >= 400:
             raise SourceUnavailable(f"http {r.status_code}")
         if self.raw_log is not None:
             self.raw_log.write(platform, tag, r.text)
         return r.text
+
+    def post(self, url: str, *, json: dict, headers: dict | None = None) -> httpx.Response:
+        """POST a JSON body through the proxy (an authenticated JSON API, e.g. an MCP server), paced
+        and counted like ``get``. The response comes back whatever its status: the caller reads the
+        API's own errors. Transport failures raise ``SourceUnavailable``."""
+        self._pace()
+        try:
+            r = self._client.post(url, json=json, headers=headers)
+        except httpx.HTTPError as e:
+            raise SourceUnavailable(f"fetch failed: {type(e).__name__}") from e
+        self.bytes_used += r.num_bytes_downloaded or len(r.content)
+        return r
 
     def close(self) -> None:
         self._client.close()
@@ -283,7 +331,7 @@ class BrowserFetcher(_Paced):
             response = page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
             status = response.status if response is not None else 0
             if status in (403, 429, 503):
-                raise SourceUnavailable(f"blocked {status}")
+                raise _blocked(status, *_response_parts(response))
             if status >= 400:
                 raise SourceUnavailable(f"http {status}")
             if raw:

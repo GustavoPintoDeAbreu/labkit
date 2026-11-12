@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from labkit.scrape import (BrowserFetcher, ProxyFetcher, RawLog, SourceUnavailable,
-                           looks_blocked)
+                           looks_blocked, block_vendor)
 
 
 def mock_client(handler):
@@ -48,6 +48,32 @@ def test_403_blocked():
     f = ProxyFetcher("u", "p", client=mock_client(lambda r: httpx.Response(403)))
     with pytest.raises(SourceUnavailable, match="blocked 403"):
         f.get("https://x.test", tag="t")
+
+
+def test_a_block_names_its_vendor_when_the_refusal_shows_it():
+    cf = ProxyFetcher("u", "p", client=mock_client(lambda r: httpx.Response(
+        403, text="<title>Just a moment...</title>", headers={"cf-mitigated": "challenge"})))
+    with pytest.raises(SourceUnavailable, match=r"^blocked 403 \(cloudflare\)$"):
+        cf.get("https://x.test", tag="t")
+    dd = ProxyFetcher("u", "p", client=mock_client(lambda r: httpx.Response(
+        403, text='<script src="https://ct.captcha-delivery.com/c.js"></script>')))
+    with pytest.raises(SourceUnavailable, match=r"\(datadome\)"):
+        dd.get("https://x.test", tag="t")
+    assert block_vendor("Access Denied") is None
+
+
+def test_post_sends_json_through_the_proxy_and_returns_any_status():
+    seen = []
+
+    def handler(r):
+        seen.append((r.method, r.headers.get("authorization"), r.content))
+        return httpx.Response(403 if b"bad" in r.content else 200, json={"ok": True})
+
+    f = ProxyFetcher("u", "p", client=mock_client(handler), sleep=lambda s: None)
+    r = f.post("https://api.test/mcp", json={"q": 1}, headers={"Authorization": "Bearer k"})
+    assert r.status_code == 200 and r.json() == {"ok": True} and f.bytes_used > 0
+    assert seen[0] == ("POST", "Bearer k", b'{"q":1}')
+    assert f.post("https://api.test/mcp", json={"q": "bad"}).status_code == 403
 
 
 def test_500_unavailable():
@@ -128,7 +154,7 @@ class FakePage:
 
     def goto(self, url, **kw):
         self.visited.append(url)
-        status, _, subs = self.pages[url]
+        status, html, subs = self.pages[url]
         if isinstance(status, Exception):
             raise status
         for req in [FakeRequest(url, body=1000, headers=200)] + subs:
@@ -143,7 +169,8 @@ class FakePage:
                     response = FakeResponse(200, req.text_body)
                     response.url = req.url
                     handler(response)
-        return FakeResponse(status, f"raw:{url}")
+        # a refusal's body is the wall page itself (what the vendor check reads)
+        return FakeResponse(status, html if status >= 400 else f"raw:{url}")
 
     def wait_for_selector(self, selector, **kw):
         self.waited.append(selector)
@@ -199,8 +226,12 @@ def test_waits_for_the_ready_selector():
 
 def test_blocks_and_failures_are_unavailable():
     f, *_ = make({"https://a/403": (403, "Access Denied", []), "https://a/x": (TimeoutError("slow"), "", [])}, [])
-    with pytest.raises(SourceUnavailable, match="blocked 403"):
+    with pytest.raises(SourceUnavailable, match="^blocked 403$"):
         f.get("https://a/403", tag="t")
+    f, *_ = make({"https://a/cf": (403, "<title>Just a moment...</title>", [])}, [])
+    with pytest.raises(SourceUnavailable, match=r"^blocked 403 \(cloudflare\)$"):
+        f.get("https://a/cf", tag="t")
+    f, *_ = make({"https://a/403": (403, "Access Denied", []), "https://a/x": (TimeoutError("slow"), "", [])}, [])
     with pytest.raises(SourceUnavailable, match="TimeoutError"):
         f.get("https://a/x", tag="t")
 
