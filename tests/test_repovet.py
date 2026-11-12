@@ -34,6 +34,8 @@ def test_repo_refs_finds_the_repositories_a_file_points_at():
             "see https://github.com/orgs/community/discussions/1\n")
     assert repovet.repo_refs(text) == [("comfyanonymous/ComfyUI", ""), ("k2-fsa/OmniVoice", ""),
                                        ("me/labkit", "v0.7.0")]
+    shell_default = 'uv pip install "${OMNIVOICE_PIP:-git+https://github.com/k2-fsa/OmniVoice}" soundfile'
+    assert repovet.repo_refs(shell_default) == [("k2-fsa/OmniVoice", "")]
 
 
 def test_is_pinned_tells_a_commit_or_tag_from_a_branch():
@@ -87,7 +89,8 @@ def test_download_hosts_and_piping_into_a_shell_are_cautions_and_a_password_make
     assert codes(repovet.scan_text("README.md", "Download: https://mega.nz/file/abc"), CAUTION) == {"download_host"}
     red = repovet.scan_text("README.md", "Download https://mediafire.com/x/tool.zip\nArchive password: 2025")
     assert codes(red, RED) == {"download_host"}
-    assert "pipe_to_shell" in codes(repovet.scan_text("README.md", "curl -s https://get.example.io/i.sh | bash"), CAUTION)
+    assert "pipe_to_shell" in codes(repovet.scan_text("install.sh", "curl -s https://get.example.io/i.sh | bash"), CAUTION)
+    assert "pipe_to_shell" in codes(repovet.scan_text("README.md", "curl -s https://get.example.io/i.sh | bash"), INFO)
 
 
 # --- activity, substance, identity ----------------------------------------------------------

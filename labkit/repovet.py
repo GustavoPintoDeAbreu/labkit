@@ -76,7 +76,7 @@ _IMPORT_FETCH = re.compile(r"(urlretrieve|requests\.get|httpx\.get|urlopen|downl
                            r"\.(exe|msi|bat|cmd|scr|ps1|zip|rar|7z)\b", re.I)
 _REPO_URL = re.compile(r"(?:git\+)?(?:https?://|git@)github\.com[/:]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)"
                        r"(?:\.git)?(?:(?:@|/archive/(?:refs/(?:tags|heads)/)?|/tree/|/commit/|/releases/download/)"
-                       r"([A-Za-z0-9_./-]+?))?(?:\.tar\.gz|\.zip)?(?=$|[\s\"'#)\]>,;])", re.I)
+                       r"([A-Za-z0-9_./-]+?))?(?:\.tar\.gz|\.zip)?(?=$|[\s\"'#)\]>,;}`])", re.I)
 _SHA = re.compile(r"[0-9a-f]{7,40}")
 _TAG = re.compile(r"v?\d+(\.\d+){1,3}([.-]?\w+)?")
 
@@ -229,7 +229,8 @@ def scan_text(path: str, text: str) -> List[Signal]:
         piped = [u for u in _URL.findall(_PIPE_SHELL.search(text).group(0))]
         if not piped or not _on(_host(piped[0]), PLAIN_HOSTS + ("astral.sh", "rustup.rs", "sh.rustup.rs", "bun.sh",
                                                                "deno.land", "get.docker.com", "ollama.com", "brew.sh")):
-            add("pipe_to_shell", CAUTION, "pipes a download straight into a shell")
+            # In a README it is how half of all tools say "install me"; in a script it is what runs.
+            add("pipe_to_shell", INFO if doc else CAUTION, "pipes a download straight into a shell")
     return signals
 
 
