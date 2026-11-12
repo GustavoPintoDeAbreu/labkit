@@ -210,6 +210,18 @@ class ProxyFetcher(_Paced):
             self.raw_log.write(platform, tag, r.text)
         return r.text
 
+    def post(self, url: str, *, json: dict, headers: dict | None = None) -> httpx.Response:
+        """POST a JSON body through the proxy (an authenticated JSON API, e.g. an MCP server), paced
+        and counted like ``get``. The response comes back whatever its status: the caller reads the
+        API's own errors. Transport failures raise ``SourceUnavailable``."""
+        self._pace()
+        try:
+            r = self._client.post(url, json=json, headers=headers)
+        except httpx.HTTPError as e:
+            raise SourceUnavailable(f"fetch failed: {type(e).__name__}") from e
+        self.bytes_used += r.num_bytes_downloaded or len(r.content)
+        return r
+
     def close(self) -> None:
         self._client.close()
 

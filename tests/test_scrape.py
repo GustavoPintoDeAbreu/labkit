@@ -62,6 +62,20 @@ def test_a_block_names_its_vendor_when_the_refusal_shows_it():
     assert block_vendor("Access Denied") is None
 
 
+def test_post_sends_json_through_the_proxy_and_returns_any_status():
+    seen = []
+
+    def handler(r):
+        seen.append((r.method, r.headers.get("authorization"), r.content))
+        return httpx.Response(403 if b"bad" in r.content else 200, json={"ok": True})
+
+    f = ProxyFetcher("u", "p", client=mock_client(handler), sleep=lambda s: None)
+    r = f.post("https://api.test/mcp", json={"q": 1}, headers={"Authorization": "Bearer k"})
+    assert r.status_code == 200 and r.json() == {"ok": True} and f.bytes_used > 0
+    assert seen[0] == ("POST", "Bearer k", b'{"q":1}')
+    assert f.post("https://api.test/mcp", json={"q": "bad"}).status_code == 403
+
+
 def test_500_unavailable():
     f = ProxyFetcher("u", "p", client=mock_client(lambda r: httpx.Response(500)))
     with pytest.raises(SourceUnavailable, match="http 500"):
