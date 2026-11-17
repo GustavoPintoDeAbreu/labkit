@@ -8,11 +8,16 @@ refused even if it reaches the app (a misrouted hostname, a direct hit on the ho
 
 Rule, per HTTP request:
 
-- it carries Cloudflare or forwarding headers (it came through the tunnel, or claims a
-  forwarded address, which uvicorn's ``--proxy-headers`` would trust), or its source address is not
+- it carries Cloudflare headers (it came through the tunnel), or its source address is not
   private (loopback, RFC 1918, the tailnet, link-local, ULA): a valid Access token is
   required — RS256, signed by the team's keys, this app's AUD tag, the team as issuer;
 - otherwise (the LAN, the tailnet, the host itself, other containers) it passes, as before.
+
+Forwarding headers (``X-Forwarded-For``) are not a reason to refuse: ``tailscale serve``
+sends them on the tailnet path. With uvicorn's ``--proxy-headers`` the client address comes
+from them, so publish the app's port only where the LAN and tailnet reach it (bind IPv4,
+firewall IPv6): then a forged header can only come from a trusted network anyway, and the
+tunnel's requests carry a public client address plus Cloudflare's headers.
 
 Without settings (``CF_ACCESS_TEAM_DOMAIN`` / ``CF_ACCESS_AUD`` unset) nothing can be
 verified, so every request that would need a token is refused: fail closed.
@@ -30,11 +35,8 @@ import ipaddress
 import os
 from typing import Any, Callable, Iterable, Optional
 
-# Any of these means the request came through a proxy (the tunnel, or someone claiming to be
-# one): the source address can't be trusted, because uvicorn's --proxy-headers rewrites the
-# client from X-Forwarded-For, so a token is required.
-PROXY_HEADERS = (b"cf-access-jwt-assertion", b"cf-connecting-ip", b"cf-ray",
-                 b"x-forwarded-for", b"forwarded", b"x-real-ip")
+# Cloudflare's headers: the request came through the tunnel, so a token is required.
+PROXY_HEADERS = (b"cf-access-jwt-assertion", b"cf-connecting-ip", b"cf-ray")
 TOKEN_HEADER = b"cf-access-jwt-assertion"
 PRIVATE_NETS = tuple(ipaddress.ip_network(n) for n in (
     "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
