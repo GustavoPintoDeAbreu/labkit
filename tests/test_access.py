@@ -53,10 +53,14 @@ def test_the_tunnel_without_a_token_is_refused_even_from_a_private_address():
     assert r.status_code == 403
 
 
-@pytest.mark.parametrize("header", ["X-Forwarded-For", "Forwarded", "X-Real-Ip"])
-def test_a_claimed_forwarded_lan_address_is_not_trusted(header):
-    """uvicorn --proxy-headers would turn "X-Forwarded-For: 192.168.1.5" into the client address."""
-    r = client(ip="192.168.1.5").get("/", headers={header: "192.168.1.5"})
+def test_the_tailnet_through_tailscale_serve_passes():
+    """tailscale serve forwards with X-Forwarded-For; uvicorn turns that into a tailnet client."""
+    r = client(ip="100.101.102.103").get("/", headers={"X-Forwarded-For": "100.101.102.103"})
+    assert r.status_code == 200
+
+
+def test_the_tunnel_with_a_public_forwarded_client_needs_a_token():
+    r = client(ip="198.51.100.1").get("/", headers={"X-Forwarded-For": "198.51.100.1", "Cf-Ray": "x"})
     assert r.status_code == 403
 
 
