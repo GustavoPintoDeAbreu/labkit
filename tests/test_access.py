@@ -53,6 +53,13 @@ def test_the_tunnel_without_a_token_is_refused_even_from_a_private_address():
     assert r.status_code == 403
 
 
+@pytest.mark.parametrize("header", ["X-Forwarded-For", "Forwarded", "X-Real-Ip"])
+def test_a_claimed_forwarded_lan_address_is_not_trusted(header):
+    """uvicorn --proxy-headers would turn "X-Forwarded-For: 192.168.1.5" into the client address."""
+    r = client(ip="192.168.1.5").get("/", headers={header: "192.168.1.5"})
+    assert r.status_code == 403
+
+
 def test_a_public_address_without_a_token_is_refused():
     assert client(ip="2a12:1234::5").get("/").status_code == 403
 

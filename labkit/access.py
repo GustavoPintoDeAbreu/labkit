@@ -8,7 +8,8 @@ refused even if it reaches the app (a misrouted hostname, a direct hit on the ho
 
 Rule, per HTTP request:
 
-- it carries Cloudflare headers (it came through the tunnel), or its source address is not
+- it carries Cloudflare or forwarding headers (it came through the tunnel, or claims a
+  forwarded address, which uvicorn's ``--proxy-headers`` would trust), or its source address is not
   private (loopback, RFC 1918, the tailnet, link-local, ULA): a valid Access token is
   required — RS256, signed by the team's keys, this app's AUD tag, the team as issuer;
 - otherwise (the LAN, the tailnet, the host itself, other containers) it passes, as before.
@@ -29,7 +30,11 @@ import ipaddress
 import os
 from typing import Any, Callable, Iterable, Optional
 
-CF_HEADERS = (b"cf-access-jwt-assertion", b"cf-connecting-ip", b"cf-ray")
+# Any of these means the request came through a proxy (the tunnel, or someone claiming to be
+# one): the source address can't be trusted, because uvicorn's --proxy-headers rewrites the
+# client from X-Forwarded-For, so a token is required.
+PROXY_HEADERS = (b"cf-access-jwt-assertion", b"cf-connecting-ip", b"cf-ray",
+                 b"x-forwarded-for", b"forwarded", b"x-real-ip")
 TOKEN_HEADER = b"cf-access-jwt-assertion"
 PRIVATE_NETS = tuple(ipaddress.ip_network(n) for n in (
     "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
@@ -100,7 +105,7 @@ class AccessGuard:
             return
         headers = dict(scope.get("headers") or [])
         client = (scope.get("client") or ("", 0))[0]
-        if not any(h in headers for h in CF_HEADERS) and is_private(client):
+        if not any(h in headers for h in PROXY_HEADERS) and is_private(client):
             scope["state"]["access_email"] = ""
             await self.app(scope, receive, send)
             return
