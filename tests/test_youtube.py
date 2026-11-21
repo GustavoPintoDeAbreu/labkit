@@ -137,6 +137,11 @@ def test_pick_caption_order():
     assert pick_caption({"subtitles": {"de": [1]}, "automatic_captions": {"en": [1]}}) == ("en", True)
     assert pick_caption({"subtitles": {"de": [1]}}) == ("de", False)
     assert pick_caption({"automatic_captions": {"pt-orig": [1], "en": [1]}, "language": "pt"}) == ("pt-orig", True)
+    # several -orig tracks (2026-11-21, an English video listed ar-orig first): the video's own language wins
+    many = {"ar-orig": [1], "ar": [1], "en": [1], "en-orig": [1], "pt-orig": [1]}
+    assert pick_caption({"automatic_captions": many, "language": "en-US"}) == ("en-orig", True)
+    assert pick_caption({"automatic_captions": many}) == ("en-orig", True)            # no language: langs order
+    assert pick_caption({"automatic_captions": {"ar-orig": [1], "de-orig": [1]}}) == ("ar-orig", True)
     assert pick_caption({"automatic_captions": {"fr": [1], "pt": [1], "en": [1]}, "language": "pt"}) == ("pt", True)
     assert pick_caption({}) is None
 

@@ -228,9 +228,17 @@ def pick_caption(info: dict, langs: tuple[str, ...] = ("en", "pt")) -> tuple[str
         k = _lang_match(manual, lang)
         if k:
             return (k, False)
-    for k in auto:
-        if k.endswith("-orig"):
-            return (k, True)
+    # Several "-orig" tracks happen (2026-11-21: an English video listed ar-orig first): the one in
+    # the video's own language, then one in ``langs``, then the first.
+    origs = [k for k in auto if k.endswith("-orig")]
+    own = (info.get("language") or "").lower()
+    for want in ([own, own.split("-")[0]] if own else []) + list(langs):
+        for k in origs:
+            base = k[:-len("-orig")].lower()
+            if base == want or base.split("-")[0] == want:
+                return (k, True)
+    if origs:
+        return (origs[0], True)
     k = _lang_match(auto, info.get("language") or "")
     if k:
         return (k, True)
