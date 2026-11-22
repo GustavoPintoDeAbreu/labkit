@@ -129,3 +129,83 @@ def test_to_text_cuts_long_parts():
 def test_cli_error(capsys):
     assert media.main(["https://example.com/page"]) == 1
     assert "not a video or reel link" in capsys.readouterr().err
+
+
+# -- the post's preview when yt-dlp cannot read the video (0.19.0) -----------------------------------
+import httpx  # noqa: E402
+
+from labkit.media import post_preview  # noqa: E402
+
+
+def _client(handler):
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_unreadable_video_falls_back_to_the_preview():
+    seen = []
+
+    def preview(site, url):
+        seen.append((site, url))
+        return Media(url=url, site=site, author="someone", title="", caption="the post's words")
+
+    m = read_media("https://x.com/someone/status/123?s=46", reader=FakeReader(None), preview=preview)
+    assert seen == [("X", "https://x.com/someone/status/123")]
+    assert m.caption == "the post's words" and "could not be read" in m.warnings[0]
+    assert "the post's words" in m.to_text()
+
+
+def test_no_preview_still_raises():
+    with pytest.raises(MediaUnreadable):
+        read_media("https://x.com/someone/status/123", reader=FakeReader(None), preview=lambda s, u: None)
+
+
+def test_x_post_without_video_reads_its_text():
+    def handler(request):
+        assert request.url.host == "cdn.syndication.twimg.com" and request.url.params["id"] == "20"
+        return httpx.Response(200, json={"__typename": "Tweet", "text": "just setting up my twttr",
+                                         "created_at": "2006-03-21T20:50:14.000Z", "favorite_count": 5,
+                                         "user": {"name": "jack", "screen_name": "jack"},
+                                         "mediaDetails": [{"type": "photo"}]})
+    m = post_preview("X", "https://x.com/jack/status/20?s=20", _client(handler))
+    assert (m.author, m.published, m.likes) == ("jack", "2006-03-21", 5)
+    assert m.caption.startswith("just setting up my twttr") and "(attached: photo)" in m.caption
+
+
+def test_x_deleted_post_is_none():
+    m = post_preview("X", "https://x.com/a/status/9", _client(
+        lambda r: httpx.Response(200, json={"__typename": "TweetTombstone"})))
+    assert m is None
+
+
+def test_tiktok_oembed_title_is_the_caption():
+    def handler(request):
+        assert request.url.host == "www.tiktok.com" and request.url.path == "/oembed"
+        return httpx.Response(200, json={"title": "GTA VI is out #gta6", "author_name": "rockstargames"})
+    m = post_preview("TikTok", "https://www.tiktok.com/@r/video/77?_t=x", _client(handler))
+    assert (m.caption, m.author, m.title) == ("GTA VI is out #gta6", "rockstargames", "")
+
+
+def test_youtube_oembed_404_is_none():
+    # a made-up video id (2026-11-22: the model invented one)
+    m = post_preview("YouTube", "https://youtu.be/24Z58zY7v9k", _client(lambda r: httpx.Response(404)))
+    assert m is None
+
+
+def test_instagram_preview_from_crawler_meta(monkeypatch):
+    monkeypatch.setattr("labkit.web.public_url", lambda url: True)
+    html = ('<html><head><meta property="og:title" content="Lontizzle on Instagram: &quot;#gta6 secret&quot;" />'
+            '<meta property="og:description" content="91K likes, 666 comments - lontizzle_yaps on November 21, '
+            '2026: &quot;Where to fight Satan #gta6&quot;. " /></head></html>')
+
+    def handler(request):
+        assert request.headers["user-agent"] == media.CRAWLER_UA
+        return httpx.Response(200, html=html)
+    m = post_preview("Instagram", "https://www.instagram.com/reel/DgB/?igsh=x", _client(handler))
+    assert (m.author, m.published, m.caption) == ("lontizzle_yaps", "2026-11-21", "Where to fight Satan #gta6")
+
+
+def test_instagram_login_page_is_none(monkeypatch):
+    monkeypatch.setattr("labkit.web.public_url", lambda url: True)
+    m = post_preview("Instagram", "https://www.instagram.com/p/x/", _client(
+        lambda r: httpx.Response(200, html="<html><head><title>Instagram</title></head></html>")))
+    assert m is None

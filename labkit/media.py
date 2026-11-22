@@ -12,20 +12,30 @@ before they are read. A link that is not one of these sites raises NotMediaLink;
 cannot read (private, deleted, a login wall) raises MediaUnreadable. Everything else (no speech,
 no ffmpeg, a long clip) becomes a warning on the returned Media.
 
+When yt-dlp cannot read a post, its caption is still taken from what the site gives anyone
+(``post_preview``): X's public embed data (a post with no video is text, a photo or a poll), TikTok's,
+YouTube's and Vimeo's oEmbed, and the link preview Instagram and Facebook give link-preview
+crawlers (an age-restricted reel, a photo post). The Media then says so in its warnings, and
+MediaUnreadable is raised only when even that is empty (a deleted post, a made-up link).
+TikTok needs yt-dlp's browser impersonation (``curl-cffi``, in ``labkit[youtube]``).
+
 Usage: ``python -m labkit.media URL`` prints what it read (no transcript of speech).
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import re
 import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
 
+import httpx
+
 from labkit.reddit import _parse
-from labkit.web import truncate
+from labkit.web import page_meta, truncate
 from labkit.youtube import BASE_OPTS, VideoUnreadable, fetch_video, is_youtube_url, watch_url, video_id
 
 CAPTION_CHARS = 2000
@@ -176,27 +186,128 @@ def _date(info: dict) -> str:
     return dt.datetime.fromtimestamp(float(ts), dt.timezone.utc).strftime("%Y-%m-%d") if ts else ""
 
 
+CRAWLER_UA = "facebookexternalhit/1.1"     # Instagram and Facebook give their link preview to this one
+X_EMBED = "https://cdn.syndication.twimg.com/tweet-result"
+OEMBED = {"TikTok": "https://www.tiktok.com/oembed", "YouTube": "https://www.youtube.com/oembed",
+          "Vimeo": "https://vimeo.com/api/oembed.json"}
+_IG_TITLE = re.compile(r"^(?P<author>.+?) on Instagram: [\"“](?P<caption>.*)[\"”]\s*$", re.S)
+_IG_DESC = re.compile(r"^(?:[\d.,KMkm]+ likes?, [\d.,KMkm]+ comments? - )?(?P<author>[\w.]+) on "
+                      r"(?P<date>[A-Z][a-z]+ \d{1,2}, \d{4}): [\"“](?P<caption>.*)[\"”]\.?\s*$", re.S)
+
+
+def _x_post(url: str, http: httpx.Client) -> Media | None:
+    parts = [p for p in _parse(url).path.split("/") if p]
+    post_id = parts[parts.index("status") + 1] if "status" in parts and parts.index("status") + 1 < len(parts) else ""
+    if not post_id.isdigit():
+        return None
+    r = http.get(X_EMBED, params={"id": post_id, "token": "a", "lang": "en"})
+    if r.status_code != 200 or not r.headers.get("content-type", "").startswith("application/json"):
+        return None
+    data = r.json()
+    if data.get("__typename") == "TweetTombstone" or not (data.get("text") or "").strip():
+        return None
+    user = data.get("user") or {}
+    kinds = sorted({str(m.get("type")) for m in data.get("mediaDetails") or [] if m.get("type")})
+    caption = str(data["text"])
+    quoted = (data.get("quoted_tweet") or {}).get("text")
+    if quoted:
+        caption += f"\n\n(quoting: {quoted})"
+    if kinds:
+        caption += f"\n\n(attached: {', '.join(kinds)})"
+    likes = data.get("favorite_count")
+    return Media(url=clean_url(url), site="X", author=str(user.get("name") or user.get("screen_name") or ""),
+                 title="", caption=caption, published=str(data.get("created_at") or "")[:10],
+                 likes=int(likes) if isinstance(likes, (int, float)) else None)
+
+
+def _oembed(site: str, url: str, http: httpx.Client) -> Media | None:
+    r = http.get(OEMBED[site], params={"url": url, "format": "json"})
+    if r.status_code != 200:
+        return None
+    data = r.json()
+    title = str(data.get("title") or "").strip()
+    if not title:                                   # TikTok answers a removed video with no title
+        return None
+    # TikTok's title is the poster's caption; YouTube's and Vimeo's is the video's title.
+    return Media(url=url, site=site, author=str(data.get("author_name") or ""),
+                 title="" if site == "TikTok" else title, caption=title if site == "TikTok" else "")
+
+
+def _preview(site: str, url: str, http: httpx.Client) -> Media | None:
+    meta = page_meta(url, http, user_agent=CRAWLER_UA)
+    title, desc = meta.get("title", ""), meta.get("description", "")
+    if not (title or desc) or title.strip().lower() in ("instagram", "facebook", "log in or sign up to view"):
+        return None
+    author, caption, published = "", desc, ""
+    found = _IG_DESC.match(desc) if site == "Instagram" else None
+    if found:
+        author, caption = found["author"], found["caption"]
+        try:
+            published = dt.datetime.strptime(found["date"], "%B %d, %Y").strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    elif site == "Instagram" and (t := _IG_TITLE.match(title)):
+        author, caption = t["author"], t["caption"]
+    return Media(url=url, site=site, author=author, title=title, caption=caption, published=published)
+
+
+def post_preview(site: str, url: str, client: httpx.Client | None = None) -> Media | None:
+    """What anyone is shown of one post (see the module docstring), or None. Never raises."""
+    http = client or httpx.Client(timeout=20, follow_redirects=True,
+                                  headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"})
+    target = watch_url(video_id(url)) if site == "YouTube" and video_id(url) else clean_url(url)
+    try:
+        if site == "X":
+            return _x_post(target, http)
+        if site in OEMBED:
+            return _oembed(site, target, http)
+        return _preview(site, target, http)
+    except Exception:
+        return None
+    finally:
+        if client is None:
+            http.close()
+
+
+def _from_preview(site: str, url: str, error: Exception, preview) -> Media:
+    """The post's preview in place of an unreadable video, or the error again when there is none."""
+    media = preview(site, url) if preview is not None else None
+    if media is None:
+        raise error if isinstance(error, MediaUnreadable) else MediaUnreadable(str(error))
+    why = str(error).split("ERROR:")[-1].strip()[:160]
+    media.warnings.append(f"the video itself could not be read ({why}): this is the post's text only")
+    return media
+
+
 def read_media(url: str, *, transcribe: Callable[[Path], str] | None = None,
-               max_transcribe_s: float = MAX_TRANSCRIBE_S, reader: Reader | None = None) -> Media:
+               max_transcribe_s: float = MAX_TRANSCRIBE_S, reader: Reader | None = None,
+               preview: Callable[[str, str], Media | None] | None = None) -> Media:
     """Read one video or reel: who posted it, when, its caption and what is said in it.
 
     ``transcribe`` turns an audio file into text; without it a clip's speech is not read (YouTube's
-    captions still are). Raises NotMediaLink and MediaUnreadable (see the module docstring)."""
+    captions still are). ``preview(site, url)`` is what a post yt-dlp cannot read falls back to
+    (``post_preview`` by default; with a test ``reader`` there is none unless given). Raises
+    NotMediaLink and MediaUnreadable (see the module docstring)."""
     site = media_site(url)
     if not site:
         raise NotMediaLink(f"not a video or reel link: {url}")
+    if preview is None and reader is None:
+        preview = post_preview
     if site == "YouTube":
         try:
             v = fetch_video(url, None) if reader is None else None
         except VideoUnreadable as e:
-            raise MediaUnreadable(str(e)) from e
+            return _from_preview(site, url, e, preview)
         if v is not None:
             return Media(url=v.url, site=site, author=v.channel, title=v.title, caption=v.description,
                          published=v.published, duration=v.duration, transcript=v.transcript_text(),
                          transcript_source="captions" if v.transcript else "", warnings=list(v.warnings))
     target = clean_url(url)
     rd = reader or YtDlpMedia()
-    info = rd.info(target)
+    try:
+        info = rd.info(target)
+    except MediaUnreadable as e:
+        return _from_preview(site, target, e, preview)
     if info.get("_type") == "playlist" and info.get("entries"):
         info = {**info, **(info["entries"][0] or {})}            # a carousel post: its first video
     duration = float(info.get("duration") or 0)
