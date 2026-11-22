@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+from html import unescape
+from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -142,6 +144,71 @@ def _read_capped(r: httpx.Response, max_bytes: int, html_only: bool) -> tuple[in
     except LookupError:
         text = raw.decode("utf-8", errors="replace")
     return r.status_code, ctype, text
+
+
+class _MetaParser(HTMLParser):
+    """The <title> and the <meta> tags of a page's head (Open Graph, Twitter, description)."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.meta: dict[str, str] = {}
+        self.title = ""
+        self._in_title = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "title":
+            self._in_title = True
+        elif tag == "meta":
+            a = {k.lower(): (v or "") for k, v in attrs}
+            key = (a.get("property") or a.get("name") or "").lower()
+            if key and a.get("content", "").strip() and key not in self.meta:
+                self.meta[key] = a["content"].strip()
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self._in_title = False
+
+    def handle_data(self, data):
+        if self._in_title and len(self.title) < 500:
+            self.title += data
+
+
+def parse_meta(html_text: str) -> dict[str, str]:
+    """``title``, ``description`` and ``site`` of a page from its head (Open Graph first, then
+    Twitter cards, then <title> / <meta name=description>); missing keys are left out."""
+    parser = _MetaParser()
+    try:
+        parser.feed(html_text[:600_000])
+    except Exception:                                    # broken markup: whatever was read so far
+        pass
+    m = parser.meta
+    out = {"title": m.get("og:title") or m.get("twitter:title") or " ".join(parser.title.split()),
+           "description": m.get("og:description") or m.get("twitter:description") or m.get("description", ""),
+           "site": m.get("og:site_name", "")}
+    return {k: unescape(v).strip() for k, v in out.items() if v and v.strip()}
+
+
+def page_meta(url: str, client: httpx.Client | None = None, *, user_agent: str | None = None,
+              timeout_s: float = 20.0, max_bytes: int = 1_500_000, allow_private: bool = False) -> dict[str, str]:
+    """A page's own title and description (its link preview), ``{}`` when there is none.
+
+    For the pages ``fetch_page`` cannot read: too little text (a shop, a song, a map), or text drawn
+    by JavaScript. Social sites give their preview to link-preview crawlers only: pass that
+    crawler's ``user_agent`` (Instagram and Facebook answer ``facebookexternalhit/1.1``). Same
+    public-address rule and size cap as ``fetch_page``; never raises."""
+    try:
+        if urlparse(url).scheme not in ("http", "https"):
+            return {}
+        http = client or _client(user_agent, timeout_s)
+        try:
+            status, _, text = _get_capped(http, url, {"User-Agent": user_agent} if user_agent else None,
+                                          timeout_s, max_bytes, html_only=True, allow_private=allow_private)
+        finally:
+            if client is None:
+                http.close()
+        return parse_meta(text) if status == 200 else {}
+    except Exception:
+        return {}
 
 
 def fetch_page(url: str, client: httpx.Client | None = None, max_chars: int = 6000, *,

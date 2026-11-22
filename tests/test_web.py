@@ -232,3 +232,21 @@ def test_public_url():
     assert web.public_url("https://example.com/x")
     assert not web.public_url("http://127.0.0.1/")
     assert not web.public_url("not a url")
+
+
+def test_parse_meta_prefers_open_graph():
+    from labkit.web import parse_meta
+    html = ("<html><head><title> Shop  page </title><meta name='description' content='plain'>"
+            "<meta property='og:title' content='Rick &amp; Morty'><meta property='og:site_name' content='Spotify'>"
+            "</head><body>x</body></html>")
+    assert parse_meta(html) == {"title": "Rick & Morty", "description": "plain", "site": "Spotify"}
+    assert parse_meta("<title>Only</title>") == {"title": "Only"}
+    assert parse_meta("not html at all") == {}
+
+
+def test_page_meta_never_fetches_private_hosts(monkeypatch):
+    import httpx
+    from labkit import web
+    monkeypatch.setattr(web, "public_url", lambda url: False)
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: (_ for _ in ()).throw(AssertionError("fetched"))))
+    assert web.page_meta("http://192.168.1.1/", client) == {}
