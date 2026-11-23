@@ -413,3 +413,24 @@ def test_user_comments_and_voice_samples(tmp_path):
     s = samples("someone", rss=r2, cache_dir=tmp_path, now=lambda: 0)
     assert len(s) == 1 and s[0]["post"] == "Qwen4 open weights not soon?"      # "ok" is too short to imitate
     assert samples("someone", rss=None, cache_dir=tmp_path, now=lambda: 3600) == s   # cached, no request
+
+
+def test_an_empty_404_feed_is_reddit_refusing_not_a_missing_subreddit():
+    import httpx
+    from labkit.reddit import RedditBlocked, RedditRSS
+    empty = ('<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">'
+             '<updated>2026-11-23T22:27:23Z</updated></feed>')
+    def handler(request):
+        if "missing" in request.url.path:
+            return httpx.Response(404, text="<html>not here</html>")
+        return httpx.Response(404, text=empty, headers={"x-ratelimit-used": "1", "x-ratelimit-remaining": "0"})
+    rss = RedditRSS("test-agent", client=httpx.Client(base_url="https://www.reddit.com",
+                                                      transport=httpx.MockTransport(handler)),
+                    min_interval_s=0, sleep=lambda s: None)
+    import pytest
+    with pytest.raises(RedditBlocked) as e:
+        rss._get("/r/LocalLLaMA/.rss")
+    assert "refusing us" in str(e.value)
+    with pytest.raises(RedditBlocked) as e:
+        rss._get("/r/missing/.rss")
+    assert "missing" in str(e.value)

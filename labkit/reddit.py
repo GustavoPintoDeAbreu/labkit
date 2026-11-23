@@ -340,6 +340,20 @@ class PostUnreadable(RedditError):                                # NEW
     without the post, or a network failure."""
 
 
+REFUSED_404 = ("Reddit answered with an empty feed. Since about 2026-11-17 it does this to every "
+               "feed read without a Reddit login from the lab, so the subreddit or post most likely "
+               "exists: Reddit is refusing us, not saying it is missing")
+
+
+def _why_404(r: httpx.Response) -> str:
+    """A 404 with an empty Atom feed and rate-limit headers is Reddit refusing unauthenticated feed
+    readers (seen on every read from 2026-11-17, even of subreddits that exist), not a missing page."""
+    body = r.text or ""
+    if "<feed" in body and "<entry" not in body and r.headers.get("x-ratelimit-used") is not None:
+        return REFUSED_404
+    return "not found: a private or missing post, multi or subreddit"
+
+
 class RedditRSS:
     """Paced RSS client. A custom ``client`` must have ``base_url="https://www.reddit.com"``."""
 
@@ -382,7 +396,7 @@ class RedditRSS:
             if r.status_code == 200:
                 return r.text
             if r.status_code == 404:
-                raise RedditBlocked(url, 404, "not found: a private or missing post, multi or subreddit")
+                raise RedditBlocked(url, 404, _why_404(r))
             if r.status_code == 403:
                 raise RedditBlocked(url, 403, "blocked by Reddit")
             if r.status_code == 429:
