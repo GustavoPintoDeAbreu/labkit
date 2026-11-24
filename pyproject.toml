@@ -18,9 +18,9 @@ stealth = ["patchright>=1.55"]
 mcp = ["mcp>=2.2,<3", "trafilatura>=2.0"]
 youtube = ["yt-dlp[default,curl-cffi]>=2025.1", "imageio-ffmpeg>=0.5"]
 access = ["pyjwt[crypto]>=2.9"]
-stt = ["faster-whisper>=1.1", "av>=19"]
+stt = ["faster-whisper>=1.1", "av>=15"]
 vision = ["pillow>=13.0"]
-test = ["pytest>=8", "pyyaml>=6", "trafilatura>=2.0", "mcp>=2.2,<3", "pyjwt[crypto]>=2.9", "starlette>=0.40", "pillow>=13.0", "av>=19", "numpy>=2"]
+test = ["pytest>=8", "pyyaml>=6", "trafilatura>=2.0", "mcp>=2.2,<3", "pyjwt[crypto]>=2.9", "starlette>=0.40", "pillow>=13.0", "av>=15", "numpy>=2"]
 
 [project.scripts]
 labkit = "labkit.cli:main"
