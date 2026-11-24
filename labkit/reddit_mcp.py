@@ -12,7 +12,15 @@ on the machine:
 - one pacing file (``fcntl`` lock) spaces requests 65 s apart for all processes, since each
   agent session starts its own server;
 - a result is cached on disk for an hour, so reading the same link again costs no request;
-- if Reddit says no (403/429), the tool says so and does not retry.
+- if Reddit says no (403/429), the tool says so and does not retry over RSS.
+
+Since about 2026-11-17 Reddit refuses every logged-out read from the lab (RSS, JSON, even the
+owner's private feed key: it redirects to its login page), and new API keys need Reddit's
+approval. So a refusal falls back to **lab-browser** (2026-11-24, the owner's choice): his own
+logged-in Chrome, driven read-only by the lab's browser agent (``browse`` on its loopback MCP,
+``LAB_BROWSER_MCP``; ``0`` turns the fallback off). It needs his desktop session with Chrome open;
+when that is not there, the tool says so. It is never a way around a block on someone else's
+behalf: it reads as him, in his browser, what he could read himself.
 """
 from __future__ import annotations
 
@@ -209,6 +217,35 @@ def fetch_image(url: str, client: httpx.Client | None = None) -> tuple[bytes, st
             http.close()
 
 
+LAB_BROWSER_MCP = os.environ.get("LAB_BROWSER_MCP", "http://127.0.0.1:8305/mcp")
+
+
+def via_browser(task: str, start_url: str, *, client: httpx.Client | None = None) -> str | None:
+    """Ask lab-browser to read a Reddit page in his Chrome. Its answer, or None when the fallback is
+    off or lab-browser does not answer at all. A browse that could not run (no desktop session)
+    comes back as text saying so."""
+    if LAB_BROWSER_MCP in ("", "0"):
+        return None
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "browse", "arguments": {"task": task, "start_url": start_url, "sites": ["reddit.com"]}}}
+    http = client or httpx.Client(timeout=900)
+    try:
+        r = http.post(LAB_BROWSER_MCP, json=body,
+                      headers={"accept": "application/json, text/event-stream"})
+        res = (r.json().get("result") or {}).get("structuredContent") or {}
+        res = res.get("result", res)
+    except (httpx.HTTPError, ValueError):
+        return None
+    finally:
+        if client is None:
+            http.close()
+    answer = str(res.get("answer") or "").strip()
+    if res.get("status") in ("done", "ok", "answered") and answer:
+        return f"(Read through lab-browser, in his Chrome: Reddit refuses the lab's logged-out reads.)\n\n{answer}"
+    return ("Reddit refuses the lab's logged-out reads, and lab-browser (his Chrome) could not read it either"
+            + (f": {answer}" if answer else "") + ". It needs his desktop session with Chrome open on the PC.")
+
+
 TOOL_DESCRIPTION = """Read one Reddit post: title, body, top comments, and the text of the pages it links to
 (a GitHub repo link gives the repo's README). Use it for any reddit.com or redd.it link the user
 gives you; generic web fetchers are refused by Reddit.
@@ -219,8 +256,10 @@ linked_pages: how many linked pages to read and include (0-5, default 3).
 image: true to also get the post's picture when it is an image post (only if you can view images).
 
 Reddit allows about one request a minute, so a call may wait up to ~65 s (share links take two
-requests). The same link is served from a cache for an hour. If Reddit refuses, say so and ask the
-user to paste the post; don't try to reach Reddit another way."""
+requests). The same link is served from a cache for an hour. If Reddit refuses (it refuses the lab's
+logged-out reads since 2026-11), the tool asks lab-browser to read it in his Chrome, which takes
+a few minutes and needs his desktop session; otherwise ask the user to paste the post. Don't try
+to reach Reddit another way."""
 
 
 def main() -> None:
@@ -237,8 +276,10 @@ def main() -> None:
         try:
             result = read_post(url, comments, linked_pages)
         except RedditError as e:
-            return (f"Could not read {url}: {e}. Reddit refusals are final (no retries, no other route); "
-                    "ask the user to paste the post's text or a screenshot.")
+            fallback = via_browser(
+                f"Read this Reddit post and report its title, author, subreddit, the full post text and the top "
+                f"{comments} comments (author and text, as written; do not summarise). Post: {url}", url)
+            return fallback or (f"Could not read {url}: {e}. Ask the user to paste the post's text or a screenshot.")
         if not (image and result["image_url"]):
             return result["text"]
         picture = fetch_image(result["image_url"])
@@ -257,8 +298,15 @@ def main() -> None:
     def read_reddit_listing(source: str, sort: str = "hot", limit: int = 15):
         try:
             return read_listing(source, sort, limit)
-        except (RedditError, ValueError) as e:
-            return f"Could not read {source}: {e}. A private feed needs his logged-in browser."
+        except RedditError as e:
+            src = source.strip().lstrip("/")
+            url = src if src.startswith("http") else f"https://www.reddit.com/{src}/{sort}/"
+            fallback = via_browser(
+                f"List the first {limit} posts on this Reddit page ({sort}): for each, the rank, title, subreddit, "
+                f"author and the post's link. Page: {url}", url)
+            return fallback or f"Could not read {source}: {e}."
+        except ValueError as e:
+            return f"Could not read {source}: {e}."
 
     server.run("stdio")
 
