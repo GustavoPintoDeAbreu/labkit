@@ -1,3 +1,4 @@
+import json
 import re
 
 import httpx
@@ -138,3 +139,37 @@ def test_fetch_image_caps_and_checks_type(monkeypatch):
     assert fetch_image("https://i.redd.it/a.png", client(302, "image/png", b"")) is None
     monkeypatch.setattr(reddit_mcp, "IMAGE_BYTES", 2)
     assert fetch_image("https://i.redd.it/a.png", client(200, "image/png", b"PNG")) is None
+
+
+def test_a_refusal_falls_back_to_lab_browser(monkeypatch):
+    import httpx
+    from labkit import reddit_mcp
+    calls = []
+    def handler(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={"result": {"structuredContent": {"result": {
+            "status": "done", "answer": "Title: llama.cpp 1.0 is out. Top comment: works fine."}}}})
+    monkeypatch.setattr(reddit_mcp, "LAB_BROWSER_MCP", "http://127.0.0.1:8305/mcp")
+    out = reddit_mcp.via_browser("read it", "https://www.reddit.com/r/x/comments/1/",
+                                 client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert "his Chrome" in out and "works fine" in out
+    args = calls[0]["params"]["arguments"]
+    assert calls[0]["params"]["name"] == "browse" and args["sites"] == ["reddit.com"]
+
+
+def test_no_desktop_session_says_so(monkeypatch):
+    import httpx
+    from labkit import reddit_mcp
+    def handler(request):
+        return httpx.Response(200, json={"result": {"structuredContent": {"result": {
+            "status": "ask_user", "answer": "The browser extension isn't connecting."}}}})
+    monkeypatch.setattr(reddit_mcp, "LAB_BROWSER_MCP", "http://127.0.0.1:8305/mcp")
+    out = reddit_mcp.via_browser("read it", "https://www.reddit.com/r/x/",
+                                 client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert "desktop session" in out and "isn't connecting" in out
+
+
+def test_the_fallback_can_be_turned_off(monkeypatch):
+    from labkit import reddit_mcp
+    monkeypatch.setattr(reddit_mcp, "LAB_BROWSER_MCP", "0")
+    assert reddit_mcp.via_browser("read it", "https://www.reddit.com/r/x/") is None
