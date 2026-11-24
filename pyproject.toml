@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "labkit"
-version = "0.20.0"
+version = "0.21.0"
 description = "Small shared pieces for Gustavo's homelab projects: WhatsApp via WAHA, the local LLM broker, Pi deploys, project scaffolding, agent skills, Reddit RSS reader, readable web page text, scraping through a residential proxy, YouTube video reader (transcript, screenshots), Cloudflare Access login check."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,7 +18,9 @@ stealth = ["patchright>=1.55"]
 mcp = ["mcp>=2.2,<3", "trafilatura>=2.0"]
 youtube = ["yt-dlp[default,curl-cffi]>=2025.1", "imageio-ffmpeg>=0.5"]
 access = ["pyjwt[crypto]>=2.9"]
-test = ["pytest>=8", "pyyaml>=6", "trafilatura>=2.0", "mcp>=2.2,<3", "pyjwt[crypto]>=2.9", "starlette>=0.40"]
+stt = ["faster-whisper>=1.1", "av>=15"]
+vision = ["pillow>=13.0"]
+test = ["pytest>=8", "pyyaml>=6", "trafilatura>=2.0", "mcp>=2.2,<3", "pyjwt[crypto]>=2.9", "starlette>=0.40", "pillow>=13.0", "av>=15", "numpy>=2"]
 
 [project.scripts]
 labkit = "labkit.cli:main"
