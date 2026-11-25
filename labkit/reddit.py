@@ -494,7 +494,8 @@ class RedditRSS:
 
 
 def fetch_post(url: str, *, user_agent: str, comments: int = 8,                 # NEW
-               client: httpx.Client | None = None, browser: bool = True) -> Post:
+               client: httpx.Client | None = None, browser: bool = True,
+               rss: "RedditRSS | None" = None) -> Post:
     """Read one Reddit post (title, subreddit, body, link_url, top comments, links).
     Accepts www/old/new/m/np permalinks, comment permalinks, redd.it/<id> and app share
     links /r/<sub>/s/<code>. See ``RedditRSS.post`` for errors.
@@ -504,23 +505,26 @@ def fetch_post(url: str, *, user_agent: str, comments: int = 8,                 
     before giving up. Only when Chrome cannot read it (lab-browser down: no desktop session, or
     not on the PC) are the public feeds tried, as before. ``browser=False`` or
     ``LAB_BROWSER_MCP=0`` skips Chrome. A feed refusal then carries why Chrome could not help.
+    ``rss`` reuses a reader (its pacing, e.g. reddit_mcp's shared one) for the share-link
+    resolve and the feed fallback.
 
     Each call builds its own client (closed when garbage-collected) and its own pacing;
     to read several posts, keep one ``RedditRSS`` so the 65 s spacing holds across them."""
     chrome_why: RedditError | None = None
+    rss = rss or RedditRSS(user_agent, client=client)
     if browser and LAB_BROWSER_MCP not in ("", "0") and is_reddit_url(url):
         try:
             # old.reddit does not follow app share codes (/r/x/s/<code>): resolve them first, a
             # plain redirect Reddit still answers logged-out, so Chrome opens the permalink.
             path = post_path(url) or _short_path(url)
             if path is None and is_redirect_link(url):
-                path = RedditRSS(user_agent, client=client)._resolve(url)
+                path = rss._resolve(url)
             return read_post_via_chrome(path or url, comments)
         except RedditError as why:
             chrome_why = why
             log.info("reddit: Chrome could not read %s (%s); trying the feeds", url, why)
     try:
-        return RedditRSS(user_agent, client=client).post(url, comments)
+        return rss.post(url, comments)
     except RedditBlocked as blocked:
         if chrome_why is not None:
             blocked.args = (f"{blocked.args[0]}; his Chrome could not read it either: {chrome_why}",)

@@ -127,3 +127,19 @@ def test_browser_false_and_non_reddit_links_skip_chrome(monkeypatch):
         fetch_post("https://www.reddit.com/r/x/comments/abc123/", user_agent="t", client=feed, browser=False)
     with pytest.raises(PostUnreadable):
         fetch_post("https://example.com/not-reddit", user_agent="t", client=feed)
+
+
+def test_reddit_mcp_read_post_reads_chrome_first(monkeypatch, tmp_path):
+    """0.22.1: read_post read the feeds only, so lab-assistant's Reddit drafts failed (2026-11-25)."""
+    from labkit import reddit_mcp
+    monkeypatch.setattr(reddit, "LAB_BROWSER_MCP", "http://lab-browser.test/mcp")
+    monkeypatch.setattr(reddit, "read_page_via_chrome", lambda url, **kw: PAGE)
+
+    class NoFeeds:
+        def post(self, url, comments):
+            pytest.fail("the feeds were read")
+
+    out = reddit_mcp.read_post("https://www.reddit.com/r/LocalLLM/comments/abc123/slug/", comments=8,
+                               linked_pages=0, rss=NoFeeds(), cache_dir=tmp_path)
+    assert "Why not put the KV cache & weights in RAM?" in out["text"]
+    assert "--kv-resident 32768" in out["text"]
