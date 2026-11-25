@@ -36,7 +36,7 @@ from urllib.parse import urlparse
 import httpx
 
 from labkit import __version__
-from labkit.reddit import IMAGE_EXT, IMAGE_HOSTS, Post, RedditError, RedditRSS
+from labkit.reddit import IMAGE_EXT, IMAGE_HOSTS, Post, RedditError, RedditRSS, fetch_post
 
 USER_AGENT = f"labkit-reddit-mcp/{__version__} (homelab coding agents)"
 CACHE_DIR = Path(os.environ.get("LABKIT_REDDIT_CACHE") or Path.home() / ".cache/labkit/reddit")
@@ -150,7 +150,10 @@ def read_post(url: str, comments: int = 8, linked_pages: int = 3, *, rss: Reddit
     except (OSError, ValueError, KeyError):
         pass
     rss = rss or SharedPaceRSS(USER_AGENT, cache_dir / "last")
-    post = rss.post(url, comments)
+    # His Chrome first, the shared-paced feeds second (labkit.reddit.fetch_post). Before 0.22.1 this
+    # read the feeds only, so every direct caller (lab-assistant's Reddit drafts) failed from
+    # 2026-11-17; only the MCP tool below fell back to lab-browser.
+    post = fetch_post(url, user_agent=USER_AGENT, comments=comments, rss=rss)
     result = {"text": render(url, post, _pages(post, linked_pages, fetch_page or _default_fetch_page)),
               "image_url": image_url(post)}
     try:
