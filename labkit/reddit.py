@@ -16,6 +16,7 @@ Reuse one ``RedditRSS`` for several posts so the pacing holds across them.
 """
 from __future__ import annotations
 
+import datetime as dt
 import html
 import logging
 import re
@@ -493,11 +494,205 @@ class RedditRSS:
 
 
 def fetch_post(url: str, *, user_agent: str, comments: int = 8,                 # NEW
-               client: httpx.Client | None = None) -> Post:
+               client: httpx.Client | None = None, browser: bool = True) -> Post:
     """Read one Reddit post (title, subreddit, body, link_url, top comments, links).
     Accepts www/old/new/m/np permalinks, comment permalinks, redd.it/<id> and app share
     links /r/<sub>/s/<code>. See ``RedditRSS.post`` for errors.
 
+    His logged-in Chrome comes first (``read_post_via_chrome``): Reddit refuses every logged-out
+    feed read from the lab since ~2026-11-17, and waiting out its 429s cost over a minute per post
+    before giving up. Only when Chrome cannot read it (lab-browser down: no desktop session, or
+    not on the PC) are the public feeds tried, as before. ``browser=False`` or
+    ``LAB_BROWSER_MCP=0`` skips Chrome. A feed refusal then carries why Chrome could not help.
+
     Each call builds its own client (closed when garbage-collected) and its own pacing;
     to read several posts, keep one ``RedditRSS`` so the 65 s spacing holds across them."""
-    return RedditRSS(user_agent, client=client).post(url, comments)
+    chrome_why: RedditError | None = None
+    if browser and LAB_BROWSER_MCP not in ("", "0") and is_reddit_url(url):
+        try:
+            # old.reddit does not follow app share codes (/r/x/s/<code>): resolve them first, a
+            # plain redirect Reddit still answers logged-out, so Chrome opens the permalink.
+            path = post_path(url) or _short_path(url)
+            if path is None and is_redirect_link(url):
+                path = RedditRSS(user_agent, client=client)._resolve(url)
+            return read_post_via_chrome(path or url, comments)
+        except RedditError as why:
+            chrome_why = why
+            log.info("reddit: Chrome could not read %s (%s); trying the feeds", url, why)
+    try:
+        return RedditRSS(user_agent, client=client).post(url, comments)
+    except RedditBlocked as blocked:
+        if chrome_why is not None:
+            blocked.args = (f"{blocked.args[0]}; his Chrome could not read it either: {chrome_why}",)
+        raise
+
+
+# ── Reddit through his Chrome (2026-11-25) ───────────────────────────────────
+# Reddit refuses every logged-out read from the lab since ~2026-11-17 (RSS, JSON, his private
+# feed key). His logged-in Chrome on the PC still reads ordinary pages, through lab-browser's
+# read_page tool (no model: it opens the page in its own tab and returns the HTML; sites limited
+# to reddit.com). redditcast and game-alerts did this on their own; this is the shared one, so
+# every fetch_post caller (idea-pipeline, lab-assistant, lab-notes…) gets it. It only answers on
+# the PC, with his desktop session and Chrome up (lab-infra desktop auto-login).
+import os as _os                                                    # noqa: E402
+
+LAB_BROWSER_MCP = _os.environ.get("LAB_BROWSER_MCP", "http://127.0.0.1:8305/mcp")
+CHROME_TIMEOUT_S = 180
+OLD_REDDIT = "https://old.reddit.com"
+
+
+def _old_reddit_url(url: str) -> str:
+    """``url`` (a feed, permalink or share link) as its old.reddit page, top comments first."""
+    parts = urlparse(url if "://" in url else "https://www.reddit.com" + url)
+    path = re.sub(r"/\.rss$|\.rss$", "", parts.path.rstrip("/")) or "/"
+    return f"{OLD_REDDIT}{path}/?sort=top"
+
+
+class _PostPage(HTMLParser):
+    """An old.reddit post page: the post's ``thing`` (id, subreddit, author, permalink, time,
+    target, title), its body (the md in its expando) and its top-level comments (first md of
+    each), each body kept as an HTML fragment for ``_parse_content``."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.meta: dict | None = None
+        self.title = ""
+        self.body = ""
+        self.comments: list[tuple[str, str]] = []
+        self._in_title = False
+        self._depth = 0
+        self._post_depth = 0
+        self._comment_depths: list[int] = []
+        self._author = ""
+        self._took = False
+        self._expando = 0
+        self._md = 0
+        self._for = ""
+        self._buf: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        cls = (a.get("class") or "").split()
+        if self._md:
+            self._buf.append(self.get_starttag_text() or "")
+        if tag == "a" and self.meta is not None and "title" in cls and not self.title and not self._comment_depths:
+            self._in_title = True
+        if tag != "div":
+            return
+        self._depth += 1
+        if "thing" in cls and self.meta is None and a.get("data-type") == "link" and "promoted" not in cls \
+                and (a.get("data-fullname") or "").startswith("t3_"):
+            self.meta = {k: a.get(f"data-{k}") or "" for k in
+                         ("fullname", "subreddit", "author", "permalink", "timestamp", "url")}
+            self._post_depth = self._depth
+        elif "thing" in cls and a.get("data-type") == "comment":
+            self._comment_depths.append(self._depth)
+            self._author, self._took = a.get("data-author") or "", False
+        elif "expando" in cls and self._post_depth and not self._comment_depths and not self.body:
+            self._expando = self._depth
+        elif "md" in cls and not self._md:
+            if self._expando and not self.body:
+                self._md, self._for, self._buf = self._depth, "post", []
+            elif len(self._comment_depths) == 1 and not self._took:
+                self._md, self._for, self._buf = self._depth, "comment", []
+
+    def handle_startendtag(self, tag, attrs):
+        if self._md:
+            self._buf.append(self.get_starttag_text() or "")
+
+    def handle_data(self, data):
+        if self._in_title:
+            self.title += data
+        if self._md:
+            self._buf.append(data)
+
+    def handle_entityref(self, name):
+        self.handle_data(f"&{name};")
+
+    def handle_charref(self, name):
+        self.handle_data(f"&#{name};")
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self._in_title:
+            self._in_title = False
+        if self._md and not (tag == "div" and self._depth == self._md):
+            self._buf.append(f"</{tag}>")
+        if tag != "div":
+            return
+        if self._md and self._depth == self._md:
+            fragment = '<div class="md">' + "".join(self._buf) + "</div>"
+            if self._for == "post":
+                self.body = fragment
+            else:
+                self.comments.append((self._author, fragment))
+                self._took = True
+            self._md = 0
+        if self._expando and self._depth == self._expando:
+            self._expando = 0
+        if self._comment_depths and self._depth == self._comment_depths[-1]:
+            self._comment_depths.pop()
+        self._depth -= 1
+
+
+def parse_post_page(page_html: str, comments: int = 8) -> Post:
+    """One old.reddit post page as a ``Post``, its comments filtered like the RSS reader's.
+    Raises ``PostUnreadable`` when the page holds no post (a login wall, an error page)."""
+    p = _PostPage()
+    p.feed(page_html)
+    p.close()
+    if p.meta is None:
+        raise PostUnreadable("the page has no Reddit post on it (a login or error page?)")
+    meta = p.meta
+    permalink = "https://www.reddit.com" + meta["permalink"]
+    target = ("https://www.reddit.com" + meta["url"]) if meta["url"].startswith("/") else meta["url"]
+    kind, link_url = _kind(target, permalink)
+    body, _, links = _parse_content(p.body) if p.body else ("", None, [])
+    try:
+        published = dt.datetime.fromtimestamp(int(meta["timestamp"]) / 1000, dt.timezone.utc).isoformat()
+    except ValueError:
+        published = ""
+    kept: list[Comment] = []
+    for author, fragment in p.comments:
+        text, _, comment_links = _parse_content(fragment)
+        words = re.sub(r"https?://\S+", "", text).split()
+        if (author.lower() in BOT_AUTHORS or text in ("[deleted]", "[removed]")
+                or "i am a bot" in text.lower() or len(words) < 3):
+            continue
+        kept.append(Comment(author, text, comment_links))
+        if len(kept) >= comments:
+            break
+    return Post(id=meta["fullname"], rank=1, subreddit=meta["subreddit"],
+                title=" ".join(html.unescape(p.title).split()), author=meta["author"],
+                permalink=permalink, kind=kind, link_url=link_url, selftext=body,
+                published=published, links=links, comments=kept)
+
+
+def read_page_via_chrome(url: str, *, client: httpx.Client | None = None,
+                         timeout: float = CHROME_TIMEOUT_S) -> str:
+    """One reddit.com page's HTML, opened in his Chrome by lab-browser's ``read_page``.
+    Raises ``PostUnreadable`` when lab-browser does not answer or could not read it."""
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "read_page",
+                       "arguments": {"url": url, "sites": ["reddit.com"], "html": True}}}
+    http = client or httpx.Client(timeout=timeout)
+    try:
+        r = http.post(LAB_BROWSER_MCP, json=body, timeout=timeout,
+                      headers={"accept": "application/json, text/event-stream"})
+        r.raise_for_status()
+        result = (r.json().get("result") or {})
+    except (httpx.HTTPError, ValueError) as e:
+        raise PostUnreadable(f"lab-browser did not answer ({type(e).__name__}): his desktop session "
+                             "and Chrome must be up on the PC") from e
+    finally:
+        if client is None:
+            http.close()
+    out = (result.get("structuredContent") or {}).get("result") or {}
+    if out.get("status") != "done" or not out.get("text"):
+        raise PostUnreadable(f"lab-browser could not read the page: "
+                             f"{out.get('answer') or out.get('status') or 'no answer'}")
+    return out["text"]
+
+
+def read_post_via_chrome(url: str, comments: int = 8, *, client: httpx.Client | None = None) -> Post:
+    """``fetch_post`` through his Chrome: ``url`` as its old.reddit page, parsed exactly, no model."""
+    return parse_post_page(read_page_via_chrome(_old_reddit_url(url), client=client), comments)
