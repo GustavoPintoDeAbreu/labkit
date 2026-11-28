@@ -13,6 +13,10 @@ description: Start a new project in Gustavo's homelab so every agent and the lab
 3. **Fill in `lab.yaml`:** summary, `runs`, `provides` (anything another project could
    reuse), `uses` (ids from the `lab` MCP). **No IPs, ports, hostnames, chat ids or
    secrets**: it may end up in a public repo, and the catalog rejects them.
+   If people will trigger it from WhatsApp (an on-demand action, a list, a switch), give it
+   a command and list it under `commands:` (`{cmd: /word, where: [dm], who: owner, summary}`;
+   `where: [group, dm]`, `who: everyone` for the friends). Kaya's `/help` is built from these,
+   so an unlisted command is invisible. Add a test that your parser and `commands:` agree.
 4. **Register it:** add the repo's path to `catalog.repos` in labwatch's `config.yaml` (PR).
 5. **If it runs unattended:** deploy with the `deploy-to-pi` skill (or the PC's broker for
    GPU work), and add a labwatch collector or health rule, through a PR.
